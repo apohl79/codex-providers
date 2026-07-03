@@ -3,6 +3,7 @@ dist/
 config.yaml
 *.log
 .env
+.no-project-context
 
 # Editor / IDE local state
 .cursor/
