@@ -69,10 +69,11 @@ test("providerForModel routes by model name", () => {
   try {
     const registry = buildRegistry(tmpDir);
     // Anthropic
-    assert.equal(registry.forModel("claude-sonnet-4-6").id, "anthropic");
+    assert.equal(registry.forModel("claude-fable-5").id, "anthropic");
+    assert.equal(registry.forModel("claude-sonnet-5").id, "anthropic");
     assert.equal(registry.forModel("sonnet").id, "anthropic");
     assert.equal(registry.forModel("opus").id, "anthropic");
-    assert.equal(registry.forModel("claude-opus-4-7").id, "anthropic");
+    assert.equal(registry.forModel("claude-opus-4-8").id, "anthropic");
     // Codex — gpt-5 family + o-series + codex- prefix
     assert.equal(registry.forModel("gpt-5").id, "codex");
     assert.equal(registry.forModel("gpt-5-codex").id, "codex");

@@ -1141,6 +1141,45 @@ test("claude-cli anthropic-beta passthrough deduplicates oauth beta", async (t) 
   assert.equal(resp.status, 200);
 });
 
+test("strips Claude Code 1m model suffix before Anthropic upstream", async (t) => {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-smoke-"));
+  const manager = makeManager(authDir, [makeToken()]);
+  const restoreFetch = withMockedFetch(async (_input, init) => {
+    const headers = init?.headers as Record<string, string>;
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.model, "claude-opus-4-8");
+    assert.doesNotMatch(headers["anthropic-beta"], /context-1m/);
+    return new Response(
+      JSON.stringify({
+        id: "msg_1",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  const server = await startApp(makeConfig(authDir), manager);
+  t.after(async () => {
+    restoreFetch();
+    await stopApp(server);
+    fs.rmSync(authDir, { recursive: true, force: true });
+  });
+
+  const resp = await requestJson({
+    server,
+    method: "POST",
+    path: "/v1/messages",
+    headers: { Authorization: "Bearer test-key" },
+    body: {
+      model: "claude-opus-4-8[1m]",
+      messages: [{ role: "user", content: "hi" }],
+    },
+  });
+
+  assert.equal(resp.status, 200);
+});
+
 test("codex responses upstream errors are normalized to OpenAI error shape", async (t) => {
   const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-smoke-"));
   saveToken(

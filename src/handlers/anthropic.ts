@@ -180,7 +180,7 @@ export function createMessagesHandler(
         console.log(JSON.stringify(body, null, 2));
       }
 
-      const model = resolveModel(body.model || "claude-sonnet-4-6");
+      const model = resolveModel(body.model || "claude-sonnet-5");
       const provider = registry.forModel(model);
       tagStatsModel(resp, model, provider.id);
 
@@ -271,7 +271,7 @@ export function createCountTokensHandler(
   return async (req: Request, resp: ExpressResponse): Promise<void> => {
     try {
       const body = req.body;
-      const model = resolveModel(body?.model || "claude-sonnet-4-6");
+      const model = resolveModel(body?.model || "claude-sonnet-5");
       const provider = registry.forModel(model);
       tagStatsModel(resp, model, provider.id);
 

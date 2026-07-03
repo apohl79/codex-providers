@@ -36,17 +36,30 @@ function formatResponsesUsage(
 // ── Model alias resolution ──
 
 const MODEL_ALIASES: Record<string, string> = {
-  opus: "claude-opus-4-7",
-  sonnet: "claude-sonnet-4-6",
+  fable: "claude-fable-5",
+  opus: "claude-opus-4-8",
+  "opus-4.8": "claude-opus-4-8",
+  sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5-20251001",
-  "claude-opus-4-7": "claude-opus-4-7",
+  "claude-fable-5": "claude-fable-5",
+  "claude-opus-4-8": "claude-opus-4-8",
+  "claude-opus-4-7": "claude-opus-4-8",
   "claude-opus-4-6": "claude-opus-4-6",
-  "claude-sonnet-4-6": "claude-sonnet-4-6",
+  "claude-sonnet-5": "claude-sonnet-5",
+  "claude-sonnet-4-6": "claude-sonnet-5",
   "claude-haiku-4-5": "claude-haiku-4-5-20251001",
 };
 
+const LONG_CONTEXT_SUFFIX_RE = /\[1m\]$/i;
+
 export function resolveModel(model: string): string {
-  return MODEL_ALIASES[model] ?? model;
+  const trimmed = model.trim();
+  const withoutLongContextSuffix = trimmed.replace(LONG_CONTEXT_SUFFIX_RE, "");
+  return (
+    MODEL_ALIASES[trimmed] ??
+    MODEL_ALIASES[withoutLongContextSuffix] ??
+    withoutLongContextSuffix
+  );
 }
 
 // ── Shared: reasoning effort → Anthropic thinking ──
@@ -150,11 +163,62 @@ function convertChatTools(tools: any[]): any[] {
   });
 }
 
+const FREEFORM_TOOL_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    input: {
+      type: "string",
+      description: "Raw input for the freeform tool.",
+    },
+  },
+  required: ["input"],
+  additionalProperties: false,
+};
+
+function convertResponsesTool(t: any): any | null {
+  if (t.type === "function" && t.name) {
+    return {
+      name: t.name,
+      description: t.description || "",
+      input_schema: t.parameters ||
+        t.input_schema || { type: "object", properties: {} },
+    };
+  }
+  if (t.type === "custom" && t.name === "apply_patch") {
+    return {
+      name: t.name,
+      description: t.description || "",
+      input_schema: FREEFORM_TOOL_INPUT_SCHEMA,
+    };
+  }
+  return null;
+}
+
+function convertResponsesTools(tools: any[]): any[] {
+  return tools
+    .map(convertResponsesTool)
+    .filter((tool: any | null): tool is any => tool !== null);
+}
+
+function customToolInputFromAnthropic(input: any): string {
+  if (typeof input === "string") return input;
+  if (typeof input?.input === "string") return input.input;
+  return JSON.stringify(input || {});
+}
+
+function customToolInputFromJson(argumentsJson: string): string {
+  try {
+    return customToolInputFromAnthropic(JSON.parse(argumentsJson || "{}"));
+  } catch {
+    return argumentsJson;
+  }
+}
+
 // ── OpenAI chat completion request → Anthropic messages request ──
 
 export function openaiToAnthropic(body: any): any {
   const anthropicBody: any = {
-    model: resolveModel(body.model || "claude-sonnet-4-6"),
+    model: resolveModel(body.model || "claude-sonnet-5"),
     max_tokens: body.max_completion_tokens || body.max_tokens || 8192,
     stream: !!body.stream,
   };
@@ -538,7 +602,7 @@ function convertResponsesPart(part: any, role: string): any[] {
 // ── OpenAI Responses API request → Anthropic messages request ──
 
 export function responsesToAnthropic(body: any): any {
-  const model = resolveModel(body.model || "claude-sonnet-4-6");
+  const model = resolveModel(body.model || "claude-sonnet-5");
   const anthropicBody: any = {
     model,
     max_tokens: body.max_output_tokens || 8192,
@@ -583,12 +647,8 @@ export function responsesToAnthropic(body: any): any {
 
   // tools
   if (Array.isArray(body.tools)) {
-    anthropicBody.tools = body.tools.map((t: any) => ({
-      name: t.name,
-      description: t.description || "",
-      input_schema: t.parameters ||
-        t.input_schema || { type: "object", properties: {} },
-    }));
+    const tools = convertResponsesTools(body.tools);
+    if (tools.length) anthropicBody.tools = tools;
   }
 
   if (body.tool_choice) {
@@ -630,7 +690,10 @@ export function responsesToAnthropic(body: any): any {
       }
     }
 
-    if (item.type === "function_call_output") {
+    if (
+      item.type === "function_call_output" ||
+      item.type === "custom_tool_call_output"
+    ) {
       messages.push({
         role: "user",
         content: [
@@ -646,10 +709,13 @@ export function responsesToAnthropic(body: any): any {
       });
     }
 
-    if (item.type === "function_call") {
+    if (item.type === "function_call" || item.type === "custom_tool_call") {
       let input: any = {};
       try {
-        input = JSON.parse(item.arguments || "{}");
+        input =
+          item.type === "custom_tool_call"
+            ? { input: item.input || "" }
+            : JSON.parse(item.arguments || "{}");
       } catch {
         /* ignore */
       }
@@ -694,14 +760,25 @@ export function anthropicToResponses(anthropicResp: any, model: string): any {
         summary: [{ type: "summary_text", text: block.thinking }],
       });
     } else if (block.type === "tool_use") {
-      toolCalls.push({
-        type: "function_call",
-        id: `fc_${block.id}`,
-        call_id: block.id,
-        name: block.name,
-        arguments: JSON.stringify(block.input || {}),
-        status: "completed",
-      });
+      if (block.name === "apply_patch") {
+        toolCalls.push({
+          type: "custom_tool_call",
+          id: `ctc_${block.id}`,
+          call_id: block.id,
+          name: block.name,
+          input: customToolInputFromAnthropic(block.input),
+          status: "completed",
+        });
+      } else {
+        toolCalls.push({
+          type: "function_call",
+          id: `fc_${block.id}`,
+          call_id: block.id,
+          name: block.name,
+          arguments: JSON.stringify(block.input || {}),
+          status: "completed",
+        });
+      }
     }
   }
 
@@ -755,6 +832,7 @@ export interface ResponsesStreamState {
   inToolBlock: boolean;
   currentToolId: string;
   currentToolName: string;
+  currentToolIsCustom: boolean;
   currentText: string;
   currentToolArgs: string;
   currentThinkingText: string;
@@ -772,6 +850,7 @@ export function makeResponsesState(): ResponsesStreamState {
     inToolBlock: false,
     currentToolId: "",
     currentToolName: "",
+    currentToolIsCustom: false,
     currentText: "",
     currentToolArgs: "",
     currentThinkingText: "",
@@ -878,7 +957,25 @@ const responsesSSEHandlers: Record<string, ResponsesSSEHandler> = {
       state.inToolBlock = true;
       state.currentToolId = block.id;
       state.currentToolName = block.name;
+      state.currentToolIsCustom = block.name === "apply_patch";
       state.currentToolArgs = "";
+      if (state.currentToolIsCustom) {
+        return [
+          formatSSE({
+            type: "response.output_item.added",
+            sequence_number: nextSeq(),
+            output_index: idx,
+            item: {
+              id: `ctc_${block.id}`,
+              type: "custom_tool_call",
+              status: "in_progress",
+              call_id: block.id,
+              name: block.name,
+              input: "",
+            },
+          }),
+        ];
+      }
       return [
         formatSSE({
           type: "response.output_item.added",
@@ -934,6 +1031,7 @@ const responsesSSEHandlers: Record<string, ResponsesSSEHandler> = {
 
     if (deltaType === "input_json_delta") {
       state.currentToolArgs += data.delta.partial_json;
+      if (state.currentToolIsCustom) return [];
       return [
         formatSSE({
           type: "response.function_call_arguments.delta",
@@ -1025,6 +1123,37 @@ const responsesSSEHandlers: Record<string, ResponsesSSEHandler> = {
       state.inThinkingBlock = false;
       state.currentThinkingText = "";
     } else if (state.inToolBlock) {
+      if (state.currentToolIsCustom) {
+        const input = customToolInputFromJson(state.currentToolArgs);
+        const ctcId = `ctc_${state.currentToolId}`;
+        out.push(
+          formatSSE({
+            type: "response.custom_tool_call_input.delta",
+            sequence_number: nextSeq(),
+            item_id: ctcId,
+            call_id: state.currentToolId,
+            output_index: idx,
+            delta: input,
+          }),
+          formatSSE({
+            type: "response.output_item.done",
+            sequence_number: nextSeq(),
+            output_index: idx,
+            item: {
+              id: ctcId,
+              type: "custom_tool_call",
+              status: "completed",
+              call_id: state.currentToolId,
+              name: state.currentToolName,
+              input,
+            },
+          }),
+        );
+        state.inToolBlock = false;
+        state.currentToolIsCustom = false;
+        state.currentToolArgs = "";
+        return out;
+      }
       const fcId = `fc_${state.currentToolId}`;
       out.push(
         formatSSE({
@@ -1049,6 +1178,7 @@ const responsesSSEHandlers: Record<string, ResponsesSSEHandler> = {
         }),
       );
       state.inToolBlock = false;
+      state.currentToolIsCustom = false;
       state.currentToolArgs = "";
     }
 

@@ -410,15 +410,25 @@ test("loadConfig normalizes debug mode", () => {
 // ══════════════════════════════════════════════════
 
 test("resolveModel maps aliases", () => {
-  assert.equal(resolveModel("opus"), "claude-opus-4-7");
-  assert.equal(resolveModel("sonnet"), "claude-sonnet-4-6");
+  assert.equal(resolveModel("fable"), "claude-fable-5");
+  assert.equal(resolveModel("fable[1m]"), "claude-fable-5");
+  assert.equal(resolveModel("opus"), "claude-opus-4-8");
+  assert.equal(resolveModel("opus[1M]"), "claude-opus-4-8");
+  assert.equal(resolveModel("claude-opus-4-7"), "claude-opus-4-8");
+  assert.equal(resolveModel("claude-opus-4-8[1m]"), "claude-opus-4-8");
+  assert.equal(resolveModel("sonnet"), "claude-sonnet-5");
+  assert.equal(resolveModel("sonnet[1m]"), "claude-sonnet-5");
+  assert.equal(resolveModel("claude-sonnet-4-6"), "claude-sonnet-5");
+  assert.equal(resolveModel("claude-sonnet-5[1m]"), "claude-sonnet-5");
   assert.equal(resolveModel("haiku"), "claude-haiku-4-5-20251001");
 });
 
 test("resolveModel passes through unknown models", () => {
   assert.equal(resolveModel("gpt-4o"), "gpt-4o");
-  assert.equal(resolveModel("claude-sonnet-4-6"), "claude-sonnet-4-6");
-  assert.equal(resolveModel("claude-opus-4-7"), "claude-opus-4-7");
+  assert.equal(resolveModel("custom-model[1m]"), "custom-model");
+  assert.equal(resolveModel("claude-fable-5"), "claude-fable-5");
+  assert.equal(resolveModel("claude-sonnet-5"), "claude-sonnet-5");
+  assert.equal(resolveModel("claude-opus-4-8"), "claude-opus-4-8");
   assert.equal(resolveModel("claude-opus-4-6"), "claude-opus-4-6");
 });
 
@@ -432,7 +442,7 @@ test("openaiToAnthropic translates basic request", () => {
     messages: [{ role: "user", content: "hello" }],
     stream: false,
   });
-  assert.equal(result.model, "claude-sonnet-4-6");
+  assert.equal(result.model, "claude-sonnet-5");
   assert.equal(result.stream, false);
   assert.equal(result.max_tokens, 8192);
   assert.deepEqual(result.messages, [{ role: "user", content: "hello" }]);
@@ -603,7 +613,7 @@ test("anthropicToOpenai translates basic response", () => {
       stop_reason: "end_turn",
       usage: { input_tokens: 10, output_tokens: 5 },
     },
-    "claude-sonnet-4-6",
+    "claude-sonnet-5",
   );
   assert.equal(result.object, "chat.completion");
   assert.equal(result.choices[0].message.content, "Hello!");
@@ -802,7 +812,7 @@ test("responsesToAnthropic translates basic request", () => {
     input: [{ role: "user", content: "hello" }],
     stream: false,
   });
-  assert.equal(result.model, "claude-sonnet-4-6");
+  assert.equal(result.model, "claude-sonnet-5");
   assert.equal(result.stream, false);
   assert.deepEqual(result.messages, [{ role: "user", content: "hello" }]);
 });
@@ -838,6 +848,85 @@ test("responsesToAnthropic translates reasoning with summary", () => {
   assert.equal(result.thinking.display, "summarized");
 });
 
+test("responsesToAnthropic aliases opus-4.8 and filters unsupported tool kinds", () => {
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    input: [{ role: "user", content: "hi" }],
+    tools: [
+      {
+        type: "function",
+        name: "exec_command",
+        description: "Run command",
+        parameters: { type: "object", properties: {} },
+      },
+      {
+        type: "custom",
+        name: "apply_patch",
+        description: "Apply patch",
+        format: { type: "grammar", syntax: "lark", definition: "start: /.+/" },
+      },
+      {
+        type: "tool_search",
+        execution: "client",
+        description: "Search deferred tools",
+        parameters: { type: "object", properties: {} },
+      },
+      { type: "web_search", external_web_access: true },
+      { type: "image_generation", output_format: "png" },
+      { type: "namespace", name: "mcp__example", tools: [] },
+    ],
+  });
+  assert.equal(result.model, "claude-opus-4-8");
+  assert.deepEqual(
+    result.tools.map((tool: any) => tool.name),
+    ["exec_command", "apply_patch"],
+  );
+  assert.deepEqual(result.tools[1].input_schema.required, ["input"]);
+});
+
+test("responsesToAnthropic translates custom tool call history", () => {
+  const patch = "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch";
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    input: [
+      {
+        type: "custom_tool_call",
+        call_id: "call_patch",
+        name: "apply_patch",
+        input: patch,
+      },
+      {
+        type: "custom_tool_call_output",
+        call_id: "call_patch",
+        output: "Success",
+      },
+    ],
+  });
+  assert.deepEqual(result.messages, [
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "call_patch",
+          name: "apply_patch",
+          input: { input: patch },
+        },
+      ],
+    },
+    {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "call_patch",
+          content: "Success",
+        },
+      ],
+    },
+  ]);
+});
+
 test("anthropicToResponses translates basic response", () => {
   const result = anthropicToResponses(
     {
@@ -845,7 +934,7 @@ test("anthropicToResponses translates basic response", () => {
       stop_reason: "end_turn",
       usage: { input_tokens: 10, output_tokens: 5 },
     },
-    "claude-sonnet-4-6",
+    "claude-sonnet-5",
   );
   assert.equal(result.object, "response");
   assert.equal(result.status, "completed");
@@ -855,6 +944,29 @@ test("anthropicToResponses translates basic response", () => {
   assert.equal(result.output_text, "Hello!");
   assert.equal(result.usage.input_tokens, 10);
   assert.equal(result.usage.output_tokens, 5);
+});
+
+test("anthropicToResponses maps apply_patch tool use to custom tool call", () => {
+  const patch = "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch";
+  const result = anthropicToResponses(
+    {
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_patch",
+          name: "apply_patch",
+          input: { input: patch },
+        },
+      ],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    },
+    "opus-4.8",
+  );
+  assert.equal(result.output[0].type, "custom_tool_call");
+  assert.equal(result.output[0].call_id, "toolu_patch");
+  assert.equal(result.output[0].name, "apply_patch");
+  assert.equal(result.output[0].input, patch);
 });
 
 test("anthropicToResponses sets incomplete status on max_tokens", () => {
@@ -889,6 +1001,12 @@ test("anthropicToResponses includes usage details", () => {
 // ══════════════════════════════════════════════════
 // translator.ts — Responses SSE streaming
 // ══════════════════════════════════════════════════
+
+function parseResponsesSSE(chunk: string): any {
+  const dataLine = chunk.split("\n").find((line) => line.startsWith("data: "));
+  assert.ok(dataLine);
+  return JSON.parse(dataLine.slice("data: ".length));
+}
 
 test("anthropicSSEToResponses handles message_start", () => {
   const state = makeResponsesState();
@@ -953,6 +1071,63 @@ test("anthropicSSEToResponses handles text streaming", () => {
   assert.ok(stopEvents.some((e) => e.includes("response.output_item.done")));
 });
 
+test("anthropicSSEToResponses maps streaming apply_patch to custom tool call", () => {
+  const state = makeResponsesState();
+  const usage: UsageData = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+  };
+  const patch = "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch";
+  const startEvents = anthropicSSEToResponses(
+    "content_block_start",
+    {
+      content_block: {
+        type: "tool_use",
+        id: "toolu_patch",
+        name: "apply_patch",
+      },
+      index: 0,
+    },
+    state,
+    "opus-4.8",
+    usage,
+  );
+  assert.equal(parseResponsesSSE(startEvents[0]).item.type, "custom_tool_call");
+
+  const deltaEvents = anthropicSSEToResponses(
+    "content_block_delta",
+    {
+      delta: {
+        type: "input_json_delta",
+        partial_json: JSON.stringify({ input: patch }),
+      },
+      index: 0,
+    },
+    state,
+    "opus-4.8",
+    usage,
+  );
+  assert.deepEqual(deltaEvents, []);
+
+  const stopEvents = anthropicSSEToResponses(
+    "content_block_stop",
+    { index: 0 },
+    state,
+    "opus-4.8",
+    usage,
+  );
+  const inputDelta = parseResponsesSSE(stopEvents[0]);
+  const done = parseResponsesSSE(stopEvents[1]);
+  assert.equal(inputDelta.type, "response.custom_tool_call_input.delta");
+  assert.equal(inputDelta.call_id, "toolu_patch");
+  assert.equal(inputDelta.delta, patch);
+  assert.equal(done.item.type, "custom_tool_call");
+  assert.equal(done.item.name, "apply_patch");
+  assert.equal(done.item.input, patch);
+});
+
 test("anthropicSSEToResponses handles message_stop with usage", () => {
   const state = makeResponsesState();
   const usage: UsageData = {
@@ -1003,7 +1178,7 @@ function makeStatsEvent(over: Partial<StatsEvent> = {}): StatsEvent {
     ip: "127.0.0.1",
     ua: "test-ua",
     endpoint: "POST /v1/chat/completions",
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     provider: "anthropic",
     accountEmail: "alice@example.com",
     status: "success",
@@ -1049,7 +1224,7 @@ test("StatsRecorder aggregates across all three views", () => {
   assert.equal(snapshot.byAccount[accKey].requests, 3);
   assert.equal(snapshot.byAccount[accKey].provider, "anthropic");
 
-  const apiKey = "POST /v1/chat/completions|claude-sonnet-4-6|anthropic";
+  const apiKey = "POST /v1/chat/completions|claude-sonnet-5|anthropic";
   assert.equal(snapshot.byApi[apiKey].requests, 3);
 });
 
@@ -1061,7 +1236,7 @@ test("StatsRecorder splits buckets by client / account / api key", () => {
       apiKeyHash: "b".repeat(64),
       accountEmail: "bob@example.com",
       endpoint: "POST /v1/messages",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     }),
   );
   const snapshot = recorder.getSnapshot();
@@ -1079,7 +1254,7 @@ test("StatsRecorder skips byAccount when provider/email missing", () => {
   assert.equal(Object.keys(snapshot.byAccount).length, 0);
   assert.equal(Object.keys(snapshot.byClient).length, 1);
   assert.equal(
-    snapshot.byApi["POST /v1/chat/completions|claude-sonnet-4-6|unknown"]
+    snapshot.byApi["POST /v1/chat/completions|claude-sonnet-5|unknown"]
       .requests,
     1,
   );
@@ -1200,7 +1375,7 @@ test("StatsRecorder persists to JSONL and replays on restart", async () => {
       ip: "127.0.0.1",
       ua: "test-ua",
       endpoint: "POST /v1/chat/completions",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       provider: "anthropic",
       accountEmail: "alice@example.com",
       status: "success",

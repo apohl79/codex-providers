@@ -145,7 +145,7 @@ curl http://127.0.0.1:8317/v1/chat/completions \
   -H "Authorization: Bearer <your-api-key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "messages": [{"role": "user", "content": "Hello!"}],
     "max_tokens": 1024
   }'
@@ -157,9 +157,9 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 
 | Model ID                                             | Provider  | Description                                        |
 | ---------------------------------------------------- | --------- | -------------------------------------------------- |
-| `claude-opus-4-7`                                    | anthropic | Claude Opus 4.7                                    |
-| `claude-opus-4-6`                                    | anthropic | Claude Opus 4.6                                    |
-| `claude-sonnet-4-6`                                  | anthropic | Claude Sonnet 4.6                                  |
+| `claude-opus-4-8`                                    | anthropic | Claude Opus 4.8                                    |
+| `claude-fable-5`                                     | anthropic | Claude Fable 5                                     |
+| `claude-sonnet-5`                                    | anthropic | Claude Sonnet 5                                    |
 | `claude-haiku-4-5-20251001`                          | anthropic | Claude Haiku 4.5                                   |
 | `claude-haiku-4-5`                                   | anthropic | Alias for Claude Haiku 4.5                         |
 | `gpt-5.5`                                            | codex     | GPT-5.5 (reasoning model)                          |
@@ -174,9 +174,11 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 
 Short convenience aliases accepted by auth2api:
 
-- `opus` -> `claude-opus-4-7`
-- `sonnet` -> `claude-sonnet-4-6`
+- `opus` -> `claude-opus-4-8`
+- `sonnet` -> `claude-sonnet-5`
 - `haiku` -> `claude-haiku-4-5-20251001`
+
+Claude Code's `[1m]` suffix is accepted on Claude aliases and API IDs (for example `opus[1m]` or `claude-opus-4-8[1m]`). auth2api strips the suffix before calling Anthropic; current 1M-capable Claude models use the 1M context window by default and do not need the retired `context-1m` beta header.
 
 Routing: requests are dispatched to the matching pool by model name. `claude-*` and the bare aliases (`opus`/`sonnet`/`haiku`) hit your Claude account; `gpt-5*`, `o\d` (`o3`, `o4-mini`, …), and `codex-*` hit your Codex account; `cursor-*` and `cr/*` hit your Cursor account. Other model families (`gpt-3.5-*`, `gpt-4*`, …) are not served by either backend and route to anthropic by default. If you haven't logged into the matching provider, the request returns `503 no_account_for_provider` with the exact `--login` command to fix it.
 
@@ -364,7 +366,7 @@ curl http://127.0.0.1:8317/admin/stats \
     "anthropic:alice@example.com": { "provider": "anthropic", "email": "alice@example.com", "requests": 100, ... }
   },
   "byApi": {
-    "POST /v1/chat/completions|claude-sonnet-4-6|anthropic": { "endpoint": "POST /v1/chat/completions", "model": "claude-sonnet-4-6", "provider": "anthropic", "requests": 80, ... }
+    "POST /v1/chat/completions|claude-sonnet-5|anthropic": { "endpoint": "POST /v1/chat/completions", "model": "claude-sonnet-5", "provider": "anthropic", "requests": 80, ... }
   },
   "totals": { "requests": 142, "successes": 140, "failures": 2, ... },
   "generated_at": "2026-05-09T12:00:00Z"

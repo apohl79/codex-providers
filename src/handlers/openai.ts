@@ -496,7 +496,7 @@ export function createChatCompletionsHandler(
       }
 
       const stream = !!body.stream;
-      const model = resolveModel(body.model || "claude-sonnet-4-6");
+      const model = resolveModel(body.model || "claude-sonnet-5");
       const provider = registry.forModel(model);
       tagStatsModel(resp, model, provider.id);
 
@@ -615,7 +615,7 @@ export function createResponsesHandler(
         return;
       }
 
-      const model = resolveModel(body.model || "claude-sonnet-4-6");
+      const model = resolveModel(body.model || "claude-sonnet-5");
       const provider = registry.forModel(model);
       tagStatsModel(resp, model, provider.id);
 

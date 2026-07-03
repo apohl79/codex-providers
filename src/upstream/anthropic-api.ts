@@ -5,6 +5,7 @@ import { CloakingConfig, Config } from "../config";
 import { AvailableAccount } from "../accounts/manager";
 import { withTimeoutSignal } from "../utils/abort";
 import { extractApiKey, hashApiKey } from "../utils/common";
+import { resolveModel } from "./translator";
 
 const BASE_URL = "https://api.anthropic.com";
 const OAUTH_BETA = "oauth-2025-04-20";
@@ -199,7 +200,12 @@ export async function callAnthropicMessages(
   const body = options.body ?? request.body;
   const url = `${BASE_URL}/v1/messages?beta=true`;
   const stream = !!body.stream;
-  const model = body.model || "claude-sonnet-4-6";
+  const rawModel = body.model;
+  const model = resolveModel(rawModel || "claude-sonnet-5");
+  const upstreamBody =
+    typeof rawModel === "string" && rawModel !== model
+      ? { ...body, model }
+      : body;
   const apiKeyHash = hashApiKey(extractApiKey(request.headers));
   const timeoutMs = stream
     ? config.timeouts["stream-messages-ms"]
@@ -218,7 +224,7 @@ export async function callAnthropicMessages(
   const response = await fetch(url, {
     method: "POST",
     headers: newHeaders,
-    body: JSON.stringify(body),
+    body: JSON.stringify(upstreamBody),
     signal: withTimeoutSignal(timeoutMs, options.signal),
   });
 
@@ -238,7 +244,12 @@ export async function callAnthropicCountTokens(
   const { request, account, config } = options;
   const body = request.body ?? {};
   const url = `${BASE_URL}/v1/messages/count_tokens?beta=true`;
-  const model = body?.model || "claude-sonnet-4-6";
+  const rawModel = body.model;
+  const model = resolveModel(rawModel || "claude-sonnet-5");
+  const upstreamBody =
+    typeof rawModel === "string" && rawModel !== model
+      ? { ...body, model }
+      : body;
   const apiKeyHash = hashApiKey(extractApiKey(request.headers));
   const timeoutMs = config.timeouts["count-tokens-ms"];
   const newHeaders = buildHeaders(
@@ -253,7 +264,7 @@ export async function callAnthropicCountTokens(
   const response = await fetch(url, {
     method: "POST",
     headers: newHeaders,
-    body: JSON.stringify(body),
+    body: JSON.stringify(upstreamBody),
     signal: withTimeoutSignal(timeoutMs, options.signal),
   });
 
