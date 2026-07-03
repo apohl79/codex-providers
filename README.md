@@ -56,20 +56,18 @@ npm run build
 For a local Codex setup backed by your Claude OAuth account:
 
 ```bash
-# 1. Log in to Claude if needed. The Codex manager can also start this flow.
-node dist/index.js --login --provider=anthropic
+# 1. Create or update the Codex Claude profile.
+#    If no Claude login exists yet, the wizard starts the login flow.
+./codex-manager
 
 # 2. Install and start the per-user LaunchAgent.
 ./install.sh
 
-# 3. Create or update the Codex Claude profile.
-./codex-manager
-
-# 4. Start Codex with the generated profile.
+# 3. Start Codex with the generated profile.
 codex -p claude
 ```
 
-`codex-manager` reads this repo's `config.yaml`, points Codex at the running local service, and writes the profile files under `~/.codex`.
+`codex-manager` reads this repo's `config.yaml`, starts the Claude login flow when needed, points Codex at the local service, and writes the profile files under `~/.codex`.
 
 ## Login
 
@@ -139,11 +137,7 @@ The installer:
 - starts `node dist/index.js --config=<repo>/config.yaml`
 - writes logs to `~/Library/Logs/auth2api/server.log` and `~/Library/Logs/auth2api/server.err.log`
 
-The installer refuses to start without an existing token file in `auth-dir` unless you pass `--skip-token-check`. For the Claude provider, create the token first with:
-
-```bash
-node dist/index.js --login --provider=anthropic
-```
+The installer refuses to start without an existing token file in `auth-dir` unless you pass `--skip-token-check`. For the Claude provider, run `./codex-manager` first; it starts the Claude login flow when no token exists yet.
 
 Useful commands:
 
@@ -234,7 +228,7 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 
 ### Available models
 
-`GET /v1/models` lists only models for providers you've actually logged in to. The codex list is **fetched live** from `chatgpt.com/backend-api/codex/models` (cached 5 minutes, ETag-aware) so it always matches what your account can actually serve. Cursor models are fetched from Cursor's internal AvailableModels endpoint when possible, with a small fallback list. The current ChatGPT-account-supported set at the time of writing:
+`GET /v1/models` lists only models for providers you've actually logged in to. Claude uses the built-in model set below. The codex list is **fetched live** from `chatgpt.com/backend-api/codex/models` (cached 5 minutes, ETag-aware) so it always matches what your account can actually serve. Cursor models are fetched from Cursor's internal AvailableModels endpoint when possible, with a small fallback list. The current supported set at the time of writing:
 
 | Model ID                                             | Provider  | Description                                        |
 | ---------------------------------------------------- | --------- | -------------------------------------------------- |
@@ -243,6 +237,9 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 | `claude-sonnet-5`                                    | anthropic | Claude Sonnet 5                                    |
 | `claude-haiku-4-5-20251001`                          | anthropic | Claude Haiku 4.5                                   |
 | `claude-haiku-4-5`                                   | anthropic | Alias for Claude Haiku 4.5                         |
+| `opus`                                               | anthropic | Alias for Claude Opus 4.8                          |
+| `sonnet`                                             | anthropic | Alias for Claude Sonnet 5                          |
+| `haiku`                                              | anthropic | Alias for Claude Haiku 4.5                         |
 | `gpt-5.5`                                            | codex     | GPT-5.5 (reasoning model)                          |
 | `gpt-5.4`                                            | codex     | GPT-5.4                                            |
 | `gpt-5.4-mini`                                       | codex     | GPT-5.4 Mini                                       |
@@ -255,13 +252,15 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 
 Short convenience aliases accepted by auth2api:
 
+- `fable` -> `claude-fable-5`
 - `opus` -> `claude-opus-4-8`
+- `opus-4.8` -> `claude-opus-4-8`
 - `sonnet` -> `claude-sonnet-5`
 - `haiku` -> `claude-haiku-4-5-20251001`
 
 Claude Code's `[1m]` suffix is accepted on Claude aliases and API IDs (for example `opus[1m]` or `claude-opus-4-8[1m]`). auth2api strips the suffix before calling Anthropic; current 1M-capable Claude models use the 1M context window by default and do not need the retired `context-1m` beta header.
 
-Routing: requests are dispatched to the matching pool by model name. `claude-*` and the bare aliases (`opus`/`sonnet`/`haiku`) hit your Claude account; `gpt-5*`, `o\d` (`o3`, `o4-mini`, …), and `codex-*` hit your Codex account; `cursor-*` and `cr/*` hit your Cursor account. Other model families (`gpt-3.5-*`, `gpt-4*`, …) are not served by either backend and route to anthropic by default. If you haven't logged into the matching provider, the request returns `503 no_account_for_provider` with the exact `--login` command to fix it.
+Routing: requests are dispatched to the matching pool by model name. `claude-*` and the bare aliases (`fable`/`opus`/`opus-4.8`/`sonnet`/`haiku`) hit your Claude account; `gpt-5*`, `o\d` (`o3`, `o4-mini`, …), and `codex-*` hit your Codex account; `cursor-*` and `cr/*` hit your Cursor account. Other model families (`gpt-3.5-*`, `gpt-4*`, …) are not served by either backend and route to anthropic by default. If you haven't logged into the matching provider, the request returns `503 no_account_for_provider` with the exact `--login` command to fix it.
 
 #### "Cursor exclusive" mode (zero-config Claude Code / OpenAI clients)
 
@@ -368,7 +367,7 @@ codex -p claude
 
 The wizard:
 
-- checks for a Claude OAuth token in `auth-dir` and can run `node dist/index.js --login --provider=anthropic` if one is missing
+- checks for a Claude OAuth token in `auth-dir` and starts the built-in login flow if one is missing
 - ensures `config.yaml` has a local proxy API key
 - reads the server endpoint from `config.yaml` instead of asking for an endpoint manually
 - writes or updates `~/.codex/config.toml`
