@@ -373,6 +373,7 @@ The wizard:
 - writes or updates `~/.codex/config.toml`
 - writes `~/.codex/claude.config.toml`
 - writes `~/.codex/claude-models.json`
+- lets you choose the default Codex reasoning level for the generated Claude model catalog
 - sets the Codex profile command to `codex -p claude`
 
 The generated profile uses provider id `anthropic`, context name `claude`, and model catalog `~/.codex/claude-models.json`.
@@ -386,6 +387,15 @@ Token budget choices in the wizard:
 | Small Claude context      | `200000`               | `190000`                         |
 | Tiny Claude context       | `128000`               | `121600`                         |
 
+Reasoning level choices in the wizard:
+
+| Choice                      | Anthropic thinking budget |
+| --------------------------- | ------------------------- |
+| Low reasoning               | `1024` tokens             |
+| Medium reasoning (recommended) | `8192` tokens          |
+| High reasoning              | `24576` tokens            |
+| Extra-high reasoning        | `32768` tokens            |
+
 Non-interactive usage:
 
 ```bash
@@ -394,6 +404,9 @@ Non-interactive usage:
 
 # Write defaults
 ./codex-manager --yes
+
+# Write with a specific default reasoning level
+./codex-manager --yes --reasoning-level high
 
 # Use manual callback URL paste if the browser callback cannot reach localhost
 ./codex-manager --manual-login

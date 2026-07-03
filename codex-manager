@@ -59,6 +59,13 @@ class Backend:
 
 
 @dataclass(frozen=True)
+class ReasoningLevel:
+    effort: str
+    label: str
+    description: str
+
+
+@dataclass(frozen=True)
 class Draft:
     context_name: str
     context_path: Path
@@ -68,6 +75,7 @@ class Draft:
     base_url: str
     selected_models: tuple[str, ...]
     default_model: str
+    reasoning_level: str
     context_window: int
     compact_limit: int
     catalog_path: Path
@@ -97,7 +105,32 @@ BACKENDS = {
 
 DEFAULT_CONTEXT_WINDOW = 400000
 DEFAULT_COMPACT_LIMIT = 380000
+DEFAULT_REASONING_LEVEL = "medium"
 CATALOG_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100
+
+REASONING_LEVELS = (
+    ReasoningLevel(
+        "low",
+        "Low reasoning",
+        "Maps to 1024 Anthropic thinking tokens. Fastest option for simple edits and lookups.",
+    ),
+    ReasoningLevel(
+        "medium",
+        "Medium reasoning (recommended)",
+        "Maps to 8192 Anthropic thinking tokens. Balanced default for normal Codex work.",
+    ),
+    ReasoningLevel(
+        "high",
+        "High reasoning",
+        "Maps to 24576 Anthropic thinking tokens. Better for larger changes and debugging.",
+    ),
+    ReasoningLevel(
+        "xhigh",
+        "Extra-high reasoning",
+        "Maps to 32768 Anthropic thinking tokens. Largest configured budget for hard tasks.",
+    ),
+)
+REASONING_BY_EFFORT = {level.effort: level for level in REASONING_LEVELS}
 
 
 CANONICAL_MODEL_ALIASES = {
@@ -590,12 +623,45 @@ def with_catalog_limits(entry: dict, context_window: int) -> dict:
     return updated
 
 
+def reasoning_level_entries() -> list[dict[str, str]]:
+    return [
+        {"effort": level.effort, "description": level.description}
+        for level in REASONING_LEVELS
+    ]
+
+
+def with_catalog_reasoning(entry: dict, default_reasoning_level: str) -> dict:
+    updated = dict(entry)
+    updated["default_reasoning_level"] = default_reasoning_level
+    updated["supported_reasoning_levels"] = reasoning_level_entries()
+    return updated
+
+
+def catalog_default_reasoning_level(source_catalog: dict, selected_models: tuple[str, ...]) -> str:
+    by_slug = catalog_entries_by_slug(source_catalog)
+    entries = [by_slug[model] for model in selected_models if model in by_slug]
+    entries.extend(entry for slug, entry in by_slug.items() if slug not in selected_models)
+    for entry in entries:
+        level = entry.get("default_reasoning_level")
+        if isinstance(level, str) and level in REASONING_BY_EFFORT:
+            return level
+    return DEFAULT_REASONING_LEVEL
+
+
+def reasoning_level_index(default_reasoning_level: str) -> int:
+    for index, level in enumerate(REASONING_LEVELS):
+        if level.effort == default_reasoning_level:
+            return index
+    return reasoning_level_index(DEFAULT_REASONING_LEVEL)
+
+
 def fallback_model_entry(
     slug: str,
     backend: Backend,
     priority: int,
     template: dict | None,
     context_window: int,
+    default_reasoning_level: str,
 ) -> dict:
     entry = dict(template or {})
     entry.update(
@@ -608,15 +674,11 @@ def fallback_model_entry(
             "priority": priority,
         }
     )
-    if "default_reasoning_level" not in entry:
-        entry["default_reasoning_level"] = "medium"
-    if "supported_reasoning_levels" not in entry:
-        entry["supported_reasoning_levels"] = [
-            {"effort": "low", "description": "Fast responses with lighter reasoning"},
-            {"effort": "medium", "description": "Balances speed and reasoning depth"},
-            {"effort": "high", "description": "Greater reasoning depth for complex tasks"},
-        ]
-    return adapt_catalog_entry(with_catalog_limits(entry, context_window), backend, slug)
+    return adapt_catalog_entry(
+        with_catalog_reasoning(with_catalog_limits(entry, context_window), default_reasoning_level),
+        backend,
+        slug,
+    )
 
 
 def build_catalog(
@@ -624,6 +686,7 @@ def build_catalog(
     backend: Backend,
     source_catalog: dict,
     context_window: int,
+    default_reasoning_level: str,
 ) -> dict:
     by_slug = catalog_entries_by_slug(source_catalog)
     template = next(iter(by_slug.values()), None)
@@ -639,9 +702,17 @@ def build_catalog(
                     "priority": index,
                 }
             )
-            entries.append(adapt_catalog_entry(with_catalog_limits(entry, context_window), backend, model))
+            entries.append(
+                adapt_catalog_entry(
+                    with_catalog_reasoning(with_catalog_limits(entry, context_window), default_reasoning_level),
+                    backend,
+                    model,
+                )
+            )
         else:
-            entries.append(fallback_model_entry(model, backend, index, template, context_window))
+            entries.append(
+                fallback_model_entry(model, backend, index, template, context_window, default_reasoning_level)
+            )
     return {"models": entries}
 
 
@@ -766,7 +837,13 @@ def write_files(
     draft.context_path.parent.mkdir(parents=True, exist_ok=True)
     existing_config = codex_config.read_text() if codex_config.exists() else ""
     next_config = f"{remove_provider_blocks(existing_config, draft.provider_id)}\n\n{provider_block(draft, repo_dir, auth2api_config)}\n"
-    catalog = build_catalog(draft.selected_models, draft.backend, source_catalog, draft.context_window)
+    catalog = build_catalog(
+        draft.selected_models,
+        draft.backend,
+        source_catalog,
+        draft.context_window,
+        draft.reasoning_level,
+    )
     codex_config.write_text(next_config)
     draft.context_path.write_text(context_content(draft))
     draft.catalog_path.write_text(json.dumps(catalog, indent=2) + "\n")
@@ -990,6 +1067,8 @@ def choose_draft(
         context_window = int(args.context_window or (source_context.context_window if source_context else DEFAULT_CONTEXT_WINDOW))
         compact_limit = int(args.compact_limit or (source_context.compact_limit if source_context else DEFAULT_COMPACT_LIMIT))
 
+    catalog_source_context = existing or source_context
+    source_catalog = load_catalog(catalog_source_context.catalog_path if catalog_source_context else None)
     base_url = normalize_base_url(default_base_url(auth_config))
 
     models, model_source = fetch_models(base_url, auth_config.api_key, backend)
@@ -1014,6 +1093,15 @@ def choose_draft(
         0,
     )
     default_model = selected_models[default_index]
+
+    current_reasoning_level = args.reasoning_level or catalog_default_reasoning_level(source_catalog, selected_models)
+    reasoning_index = ui.menu(
+        "Reasoning Level",
+        "Codex uses this as the default reasoning effort for generated Claude catalog entries.",
+        [(level.label, level.description) for level in REASONING_LEVELS],
+        reasoning_level_index(current_reasoning_level),
+    )
+    reasoning_level = REASONING_LEVELS[reasoning_index].effort
 
     budget_choice = ui.menu(
         "Token Budget",
@@ -1049,6 +1137,7 @@ def choose_draft(
         base_url=base_url,
         selected_models=selected_models,
         default_model=default_model,
+        reasoning_level=reasoning_level,
         context_window=context_window,
         compact_limit=compact_limit,
         catalog_path=catalog_path,
@@ -1066,8 +1155,6 @@ def choose_draft(
     if action == 2:
         raise KeyboardInterrupt
 
-    catalog_source_context = existing or source_context
-    source_catalog = load_catalog(catalog_source_context.catalog_path if catalog_source_context else None)
     return draft, source_catalog
 
 
@@ -1075,7 +1162,7 @@ def summary_text(draft: Draft, codex_config: Path) -> str:
     return (
         f"{draft.backend.label} provider {draft.provider_id}; context {draft.context_name}; "
         f"{len(draft.selected_models)} models; default {draft.default_model}; "
-        f"endpoint {draft.base_url}; config {codex_config}"
+        f"reasoning {draft.reasoning_level}; endpoint {draft.base_url}; config {codex_config}"
     )
 
 
@@ -1108,6 +1195,7 @@ def noninteractive_draft(
     provider_id = sanitize_identifier(existing.provider_id if existing and existing.provider_id else backend.default_provider)
     context_window = int(args.context_window or (catalog_source_context.context_window if catalog_source_context else DEFAULT_CONTEXT_WINDOW))
     compact_limit = int(args.compact_limit or (catalog_source_context.compact_limit if catalog_source_context else DEFAULT_COMPACT_LIMIT))
+    reasoning_level = args.reasoning_level or catalog_default_reasoning_level(source_catalog, selected_models)
     catalog_path = catalog_path_for_backend(codex_home, backend)
     return (
         Draft(
@@ -1119,6 +1207,7 @@ def noninteractive_draft(
             base_url=base_url,
             selected_models=selected_models,
             default_model=default_model,
+            reasoning_level=reasoning_level,
             context_window=context_window,
             compact_limit=compact_limit,
             catalog_path=catalog_path,
@@ -1136,6 +1225,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--display-name", help="Provider display name.")
     parser.add_argument("--model", help="Default model for the context.")
     parser.add_argument("--models", help="Comma-separated models to include. Defaults to all available.")
+    parser.add_argument(
+        "--reasoning-level",
+        choices=tuple(REASONING_BY_EFFORT),
+        default=os.environ.get("CODEX_REASONING_LEVEL"),
+        help="Default Codex reasoning level for generated model catalog entries.",
+    )
     parser.add_argument("--context-window", type=int, help="Codex model_context_window value.")
     parser.add_argument("--compact-limit", type=int, help="Codex model_auto_compact_token_limit value.")
     parser.add_argument("--codex-home", default=os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
@@ -1162,6 +1257,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("only the claude preset is supported.")
     if args.context or args.provider:
         parser.error("--context and --provider are no longer supported.")
+    if args.reasoning_level and args.reasoning_level not in REASONING_BY_EFFORT:
+        parser.error("--reasoning-level must be one of: " + ", ".join(REASONING_BY_EFFORT))
     return args
 
 
@@ -1204,6 +1301,7 @@ def main() -> int:
         print(f"Would update model catalog: {draft.catalog_path}")
         print(f"Provider: {draft.provider_id} ({draft.display_name})")
         print(f"Models: {', '.join(draft.selected_models)}")
+        print(f"Reasoning level: {draft.reasoning_level}")
         return 0
 
     backups = write_files(draft, codex_config, repo_dir, auth2api_config, source_catalog)
