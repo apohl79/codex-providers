@@ -39,6 +39,38 @@ npm install
 npm run build
 ```
 
+### Fork branch
+
+The `apohl79/main-fork` branch adds a macOS LaunchAgent installer, a Codex profile wizard, current Claude model defaults, Claude Code `[1m]` model suffix handling, and Responses custom-tool compatibility for freeform tools such as `apply_patch`.
+
+```bash
+git clone https://github.com/apohl79/auth2api
+cd auth2api
+git checkout main-fork
+npm install
+npm run build
+```
+
+### Recommended local macOS + Codex setup
+
+For a local Codex setup backed by your Claude OAuth account:
+
+```bash
+# 1. Log in to Claude if needed. The Codex manager can also start this flow.
+node dist/index.js --login --provider=anthropic
+
+# 2. Install and start the per-user LaunchAgent.
+./install.sh
+
+# 3. Create or update the Codex Claude profile.
+./codex-manager
+
+# 4. Start Codex with the generated profile.
+codex -p claude
+```
+
+`codex-manager` reads this repo's `config.yaml`, points Codex at the running local service, and writes the profile files under `~/.codex`.
+
 ## Login
 
 auth2api supports these upstream providers:
@@ -90,6 +122,55 @@ node dist/index.js
 ```
 
 The server starts on `http://127.0.0.1:8317` by default. On first run, an API key is auto-generated and saved to `config.yaml`.
+
+### macOS LaunchAgent
+
+The fork includes `install.sh`, which installs auth2api as a per-user macOS LaunchAgent and starts it immediately:
+
+```bash
+./install.sh
+```
+
+The installer:
+
+- runs `npm install`
+- runs `npm run build`
+- writes `~/Library/LaunchAgents/com.auth2api.server.plist`
+- starts `node dist/index.js --config=<repo>/config.yaml`
+- writes logs to `~/Library/Logs/auth2api/server.log` and `~/Library/Logs/auth2api/server.err.log`
+
+The installer refuses to start without an existing token file in `auth-dir` unless you pass `--skip-token-check`. For the Claude provider, create the token first with:
+
+```bash
+node dist/index.js --login --provider=anthropic
+```
+
+Useful commands:
+
+```bash
+# Check service state
+launchctl print "gui/$(id -u)/com.auth2api.server"
+
+# Check the listener and health endpoint
+curl http://127.0.0.1:8317/health
+
+# Follow logs
+tail -f ~/Library/Logs/auth2api/server.log
+tail -f ~/Library/Logs/auth2api/server.err.log
+
+# Write the plist without starting it
+./install.sh --no-start
+
+# Remove the LaunchAgent
+./install.sh --uninstall
+```
+
+Environment overrides:
+
+```bash
+AUTH2API_CONFIG_PATH=/path/to/config.yaml ./install.sh
+AUTH2API_LAUNCH_LABEL=com.example.auth2api ./install.sh
+```
 
 ## Configuration
 
@@ -275,6 +356,58 @@ claude
 ```
 
 Claude Code uses the native `/v1/messages` endpoint which auth2api passes through directly. Both `Authorization: Bearer` and `x-api-key` authentication headers are supported.
+
+## Use with Codex
+
+The fork includes `codex-manager`, a curses-based wizard that configures Codex to use this local auth2api server as a Claude provider.
+
+```bash
+./codex-manager
+codex -p claude
+```
+
+The wizard:
+
+- checks for a Claude OAuth token in `auth-dir` and can run `node dist/index.js --login --provider=anthropic` if one is missing
+- ensures `config.yaml` has a local proxy API key
+- reads the server endpoint from `config.yaml` instead of asking for an endpoint manually
+- writes or updates `~/.codex/config.toml`
+- writes `~/.codex/claude.config.toml`
+- writes `~/.codex/claude-models.json`
+- sets the Codex profile command to `codex -p claude`
+
+The generated profile uses provider id `anthropic`, context name `claude`, and model catalog `~/.codex/claude-models.json`.
+
+Token budget choices in the wizard:
+
+| Choice                    | `model_context_window` | `model_auto_compact_token_limit` |
+| ------------------------- | ---------------------- | -------------------------------- |
+| Claude 1M context         | `1000000`              | `950000`                         |
+| Recommended Claude context | `400000`               | `380000`                         |
+| Small Claude context      | `200000`               | `190000`                         |
+| Tiny Claude context       | `128000`               | `121600`                         |
+
+Non-interactive usage:
+
+```bash
+# Preview without writing
+./codex-manager --yes --dry-run
+
+# Write defaults
+./codex-manager --yes
+
+# Use manual callback URL paste if the browser callback cannot reach localhost
+./codex-manager --manual-login
+
+# Write Codex config even before logging in
+./codex-manager --skip-login-check
+```
+
+If the LaunchAgent is installed, restart or kick it after changing `config.yaml` so the running service picks up the latest API key set:
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/com.auth2api.server"
+```
 
 ## Multi-account
 
