@@ -1069,6 +1069,12 @@ test("anthropicSSEToResponses handles text streaming", () => {
   );
   assert.ok(stopEvents.some((e) => e.includes("response.output_text.done")));
   assert.ok(stopEvents.some((e) => e.includes("response.output_item.done")));
+  const outputItemDone = stopEvents
+    .map(parseResponsesSSE)
+    .find((event) => event.type === "response.output_item.done");
+  assert.deepEqual(outputItemDone?.item.content, [
+    { type: "output_text", text: "Hello", annotations: [] },
+  ]);
 });
 
 test("anthropicSSEToResponses maps streaming apply_patch to custom tool call", () => {

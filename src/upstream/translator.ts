@@ -1082,7 +1082,13 @@ const responsesSSEHandlers: Record<string, ResponsesSSEHandler> = {
             type: "message",
             status: "completed",
             role: "assistant",
-            content: [],
+            content: [
+              {
+                type: "output_text",
+                text: state.currentText,
+                annotations: [],
+              },
+            ],
           },
         }),
       );
