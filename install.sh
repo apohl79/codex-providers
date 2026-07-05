@@ -1,57 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LABEL="${AUTH2API_LAUNCH_LABEL:-com.auth2api.server}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_PATH="${AUTH2API_CONFIG_PATH:-$SCRIPT_DIR/config.yaml}"
-PLIST_DIR="$HOME/Library/LaunchAgents"
-PLIST_PATH="$PLIST_DIR/$LABEL.plist"
-LOG_DIR="$HOME/Library/Logs/auth2api"
-SKIP_TOKEN_CHECK=0
-START_SERVICE=1
-UNINSTALL=0
+RUNNER_NAME="${AUTH2API_RUNNER_NAME:-auth2api}"
+
+if [[ -d "$HOME/bin" ]]; then
+  BIN_DIR="$HOME/bin"
+else
+  BIN_DIR="$HOME/.local/bin"
+  mkdir -p "$BIN_DIR"
+fi
+
+RUNNER_PATH="$BIN_DIR/$RUNNER_NAME"
+
+cat >"$RUNNER_PATH" <<'RUNNER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR=__AUTH2API_REPO_DIR__
+CONFIG_PATH="${AUTH2API_CONFIG_PATH:-$REPO_DIR/config.yaml}"
+LOG_DIR="${AUTH2API_LOG_DIR:-$HOME/.local/state/auth2api}"
+PID_FILE="${AUTH2API_PID_FILE:-$LOG_DIR/server.pid}"
 
 usage() {
   cat <<USAGE
-Usage: ./install.sh [options]
+Usage: auth2api [ensure|start|--login|<auth2api args>]
 
-Installs auth2api as a per-user macOS LaunchAgent.
+Commands:
+  ensure   Start auth2api in the background unless its health endpoint is ready.
+  start    Run auth2api in the foreground.
 
-Options:
-  --skip-token-check  Install even if no auth2api OAuth token files are present.
-  --no-start          Write the LaunchAgent plist but do not load/start it now.
-  --uninstall         Stop and remove the LaunchAgent plist.
-  -h, --help          Show this help.
+All other arguments are passed to node dist/index.js with this repo's config.yaml.
 
 Environment:
-  AUTH2API_CONFIG_PATH   Config file path. Default: <repo>/config.yaml
-  AUTH2API_LAUNCH_LABEL  LaunchAgent label. Default: com.auth2api.server
+  AUTH2API_CONFIG_PATH  Config file path. Default: <repo>/config.yaml
+  AUTH2API_LOG_DIR      Background server log directory. Default: ~/.local/state/auth2api
+  AUTH2API_PID_FILE     Background server PID file. Default: <log-dir>/server.pid
 USAGE
 }
-
-while (($#)); do
-  case "$1" in
-    --skip-token-check)
-      SKIP_TOKEN_CHECK=1
-      ;;
-    --no-start)
-      START_SERVICE=0
-      ;;
-    --uninstall)
-      UNINSTALL=1
-      ;;
-    -h | --help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Error: unknown option: $1" >&2
-      usage >&2
-      exit 2
-      ;;
-  esac
-  shift
-done
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -60,158 +46,192 @@ require_command() {
   fi
 }
 
-xml_escape() {
-  local value="$1"
-  value="${value//&/&amp;}"
-  value="${value//</&lt;}"
-  value="${value//>/&gt;}"
-  value="${value//\"/&quot;}"
-  value="${value//\'/&apos;}"
-  printf '%s' "$value"
+read_config_key() {
+  local key="$1"
+  [[ -f "$CONFIG_PATH" ]] || return 1
+  awk -v key="$key" '
+    $0 ~ "^[[:space:]]*" key "[[:space:]]*:" {
+      sub("^[[:space:]]*" key "[[:space:]]*:[[:space:]]*", "")
+      sub("[[:space:]]+#.*$", "")
+      gsub("^[ \t\"\047]+|[ \t\"\047]+$", "")
+      print
+      exit
+    }
+  ' "$CONFIG_PATH"
 }
 
-resolve_auth_dir() {
-  AUTH2API_CONFIG_PATH="$CONFIG_PATH" AUTH2API_REPO_DIR="$SCRIPT_DIR" "$NODE_BIN" <<'NODE'
-const fs = require("fs");
-const path = require("path");
-
-const repoDir = process.env.AUTH2API_REPO_DIR;
-const configPath = process.env.AUTH2API_CONFIG_PATH;
-const yaml = require(path.join(repoDir, "node_modules", "js-yaml"));
-
-let authDir = "~/.auth2api";
-if (fs.existsSync(configPath)) {
-  const parsed = yaml.load(fs.readFileSync(configPath, "utf8")) || {};
-  if (typeof parsed["auth-dir"] === "string") authDir = parsed["auth-dir"];
+server_host() {
+  local host
+  host="$(read_config_key host || true)"
+  case "$host" in
+    "" | "0.0.0.0" | "::" | "[::]")
+      echo "127.0.0.1"
+      ;;
+    *)
+      echo "$host"
+      ;;
+  esac
 }
 
-const resolved = authDir.startsWith("~")
-  ? path.join(process.env.HOME || "", authDir.slice(1))
-  : path.isAbsolute(authDir)
-    ? authDir
-    : path.resolve(repoDir, authDir);
-
-process.stdout.write(resolved);
-NODE
+server_port() {
+  local port
+  port="$(read_config_key port || true)"
+  if [[ -n "$port" ]]; then
+    echo "$port"
+  else
+    echo "8317"
+  fi
 }
 
-has_account_files() {
-  compgen -G "$AUTH_DIR/claude-*.json" >/dev/null ||
-    compgen -G "$AUTH_DIR/codex-*.json" >/dev/null ||
-    compgen -G "$AUTH_DIR/cursor-*.json" >/dev/null
+health_url() {
+  local host port
+  host="$(server_host)"
+  port="$(server_port)"
+  if [[ "$host" == *:* && "$host" != \[*\] ]]; then
+    host="[$host]"
+  fi
+  printf 'http://%s:%s/health\n' "$host" "$port"
 }
 
-uninstall() {
-  local domain
-  domain="gui/$(id -u)"
+is_running() {
+  local url="$1"
+  curl -fsS --max-time 1 "$url" 2>/dev/null |
+    grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+}
 
-  if launchctl print "$domain/$LABEL" >/dev/null 2>&1; then
-    launchctl bootout "$domain" "$PLIST_PATH" >/dev/null 2>&1 || true
+needs_build() {
+  if [[ ! -f "$REPO_DIR/dist/index.js" ]]; then
+    return 0
   fi
 
-  rm -f "$PLIST_PATH"
-  echo "Removed LaunchAgent: $PLIST_PATH"
+  find \
+    "$REPO_DIR/src" \
+    "$REPO_DIR/package.json" \
+    "$REPO_DIR/package-lock.json" \
+    "$REPO_DIR/tsconfig.json" \
+    -type f \
+    -newer "$REPO_DIR/dist/index.js" \
+    2>/dev/null |
+    grep -q .
 }
 
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "Error: LaunchAgents are only supported on macOS." >&2
-  exit 1
-fi
+needs_install() {
+  if [[ ! -d "$REPO_DIR/node_modules" ]]; then
+    return 0
+  fi
 
-if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-  echo "Error: run this installer as your user, not with sudo." >&2
-  exit 1
-fi
+  if [[ ! -f "$REPO_DIR/node_modules/.package-lock.json" ]]; then
+    return 0
+  fi
 
-require_command launchctl
+  find \
+    "$REPO_DIR/package.json" \
+    "$REPO_DIR/package-lock.json" \
+    -type f \
+    -newer "$REPO_DIR/node_modules/.package-lock.json" \
+    2>/dev/null |
+    grep -q .
+}
 
-if [[ "$UNINSTALL" -eq 1 ]]; then
-  uninstall
-  exit 0
-fi
+ensure_build() {
+  require_command node
+  require_command npm
 
-require_command node
-require_command npm
-require_command plutil
+  cd "$REPO_DIR"
 
-NODE_BIN="$(node -p 'process.execPath')"
+  if needs_install; then
+    npm install
+  fi
 
-cd "$SCRIPT_DIR"
+  if needs_build; then
+    npm run build
+  fi
+}
 
-echo "Installing dependencies..."
-npm install
+start_background() {
+  require_command node
+  mkdir -p "$LOG_DIR"
 
-echo "Building auth2api..."
-npm run build
+  local log_file pid
+  log_file="$LOG_DIR/server.log"
 
-if [[ ! -f "$SCRIPT_DIR/dist/index.js" ]]; then
-  echo "Error: build did not produce dist/index.js" >&2
-  exit 1
-fi
+  cd "$REPO_DIR"
+  nohup node "$REPO_DIR/dist/index.js" "--config=$CONFIG_PATH" >>"$log_file" 2>&1 &
+  pid="$!"
+  printf '%s\n' "$pid" >"$PID_FILE"
+  echo "$pid"
+}
 
-AUTH_DIR="$(resolve_auth_dir)"
+ensure_server() {
+  require_command curl
 
-if [[ "$SKIP_TOKEN_CHECK" -eq 0 ]] && ! has_account_files; then
-  cat >&2 <<ERROR
-Error: no auth2api account token files found in $AUTH_DIR.
+  local url
+  url="$(health_url)"
 
-Run a login first, for example:
-  node dist/index.js --login --provider=codex
+  if is_running "$url"; then
+    echo "auth2api already running at $url"
+    return 0
+  fi
 
-Then run ./install.sh again. To install before logging in, pass --skip-token-check.
-ERROR
-  exit 1
-fi
+  ensure_build
 
-mkdir -p "$PLIST_DIR" "$LOG_DIR"
+  local pid
+  pid="$(start_background)"
+  echo "Starting auth2api at $url (pid $pid)"
 
-cat >"$PLIST_PATH" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>$(xml_escape "$LABEL")</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>$(xml_escape "$NODE_BIN")</string>
-    <string>$(xml_escape "$SCRIPT_DIR/dist/index.js")</string>
-    <string>--config=$(xml_escape "$CONFIG_PATH")</string>
-  </array>
-  <key>WorkingDirectory</key>
-  <string>$(xml_escape "$SCRIPT_DIR")</string>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>NODE_ENV</key>
-    <string>production</string>
-  </dict>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>$(xml_escape "$LOG_DIR/server.log")</string>
-  <key>StandardErrorPath</key>
-  <string>$(xml_escape "$LOG_DIR/server.err.log")</string>
-</dict>
-</plist>
-PLIST
+  for _ in $(seq 1 50); do
+    if is_running "$url"; then
+      echo "auth2api ready at $url"
+      return 0
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "Error: auth2api exited before becoming ready. See $LOG_DIR/server.log" >&2
+      return 1
+    fi
+    sleep 0.2
+  done
 
-plutil -lint "$PLIST_PATH" >/dev/null
+  echo "Error: auth2api did not become ready. See $LOG_DIR/server.log" >&2
+  return 1
+}
 
-if [[ "$START_SERVICE" -eq 1 ]]; then
-  DOMAIN="gui/$(id -u)"
-  launchctl bootout "$DOMAIN" "$PLIST_PATH" >/dev/null 2>&1 || true
-  launchctl bootstrap "$DOMAIN" "$PLIST_PATH"
-  launchctl enable "$DOMAIN/$LABEL"
-  launchctl kickstart -k "$DOMAIN/$LABEL"
+run_foreground() {
+  ensure_build
+  cd "$REPO_DIR"
+  exec node "$REPO_DIR/dist/index.js" "--config=$CONFIG_PATH" "$@"
+}
 
-  echo "Installed and started LaunchAgent: $PLIST_PATH"
-  echo "Logs: $LOG_DIR/server.log and $LOG_DIR/server.err.log"
-else
-  echo "Installed LaunchAgent: $PLIST_PATH"
-  echo "Not started because --no-start was provided."
-fi
+case "${1:-}" in
+  ensure)
+    shift
+    ensure_server "$@"
+    ;;
+  start)
+    shift
+    run_foreground "$@"
+    ;;
+  -h | --help | help)
+    usage
+    ;;
+  *)
+    run_foreground "$@"
+    ;;
+esac
+RUNNER
+
+repo_literal="$(printf '%q' "$SCRIPT_DIR")"
+repo_replacement="${repo_literal//\\/\\\\}"
+repo_replacement="${repo_replacement//&/\\&}"
+repo_replacement="${repo_replacement//|/\\|}"
+
+sed -i.bak "s|__AUTH2API_REPO_DIR__|$repo_replacement|g" "$RUNNER_PATH"
+rm -f "$RUNNER_PATH.bak"
+chmod 755 "$RUNNER_PATH"
+
+cat <<EOF
+Installed auth2api runner: $RUNNER_PATH
+
+Use:
+  $RUNNER_PATH ensure
+
+EOF

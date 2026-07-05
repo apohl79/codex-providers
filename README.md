@@ -41,7 +41,7 @@ npm run build
 
 ### Fork branch
 
-The `apohl79/main-fork` branch adds a macOS LaunchAgent installer, a Codex profile wizard, current Claude model defaults, Claude Code `[1m]` model suffix handling, and Responses custom-tool compatibility for freeform tools such as `apply_patch`.
+The `apohl79/main-fork` branch adds a Codex profile wizard, current Claude model defaults, Claude Code `[1m]` model suffix handling, and Responses custom-tool compatibility for freeform tools such as `apply_patch`.
 
 ```bash
 git clone https://github.com/apohl79/auth2api
@@ -60,10 +60,13 @@ For a local Codex setup backed by your Claude OAuth account:
 #    If no Claude login exists yet, the wizard starts the login flow.
 ./codex-manager
 
-# 2. Install and start the per-user LaunchAgent.
+# 2. Install the auth2api runner.
 ./install.sh
 
-# 3. Start Codex with the generated profile.
+# 3. Start the local server if it is not already running.
+auth2api ensure
+
+# 4. Start Codex with the generated profile.
 codex -p claude
 ```
 
@@ -121,50 +124,16 @@ node dist/index.js
 
 The server starts on `http://127.0.0.1:8317` by default. On first run, an API key is auto-generated and saved to `config.yaml`.
 
-### macOS LaunchAgent
+### Runner install
 
-The fork includes `install.sh`, which installs auth2api as a per-user macOS LaunchAgent and starts it immediately:
+The repo includes `install.sh`, which writes an `auth2api` runner script to `~/bin` when that directory exists, otherwise to `~/.local/bin`.
 
 ```bash
 ./install.sh
+auth2api ensure
 ```
 
-The installer:
-
-- runs `npm install`
-- runs `npm run build`
-- writes `~/Library/LaunchAgents/com.auth2api.server.plist`
-- starts `node dist/index.js --config=<repo>/config.yaml`
-- writes logs to `~/Library/Logs/auth2api/server.log` and `~/Library/Logs/auth2api/server.err.log`
-
-The installer refuses to start without an existing token file in `auth-dir` unless you pass `--skip-token-check`. For the Claude provider, run `./codex-manager` first; it starts the Claude login flow when no token exists yet.
-
-Useful commands:
-
-```bash
-# Check service state
-launchctl print "gui/$(id -u)/com.auth2api.server"
-
-# Check the listener and health endpoint
-curl http://127.0.0.1:8317/health
-
-# Follow logs
-tail -f ~/Library/Logs/auth2api/server.log
-tail -f ~/Library/Logs/auth2api/server.err.log
-
-# Write the plist without starting it
-./install.sh --no-start
-
-# Remove the LaunchAgent
-./install.sh --uninstall
-```
-
-Environment overrides:
-
-```bash
-AUTH2API_CONFIG_PATH=/path/to/config.yaml ./install.sh
-AUTH2API_LAUNCH_LABEL=com.example.auth2api ./install.sh
-```
+`auth2api ensure` checks the configured `/health` endpoint and exits if the server is already ready. Otherwise it installs dependencies when needed, builds `dist/index.js` when needed, starts `node dist/index.js --config=<repo>/config.yaml` in the background, and waits for the health endpoint to become ready. Background logs are written to `~/.local/state/auth2api/server.log` by default.
 
 ## Configuration
 
@@ -414,12 +383,6 @@ Non-interactive usage:
 
 # Write Codex config even before logging in
 ./codex-manager --skip-login-check
-```
-
-If the LaunchAgent is installed, restart or kick it after changing `config.yaml` so the running service picks up the latest API key set:
-
-```bash
-launchctl kickstart -k "gui/$(id -u)/com.auth2api.server"
 ```
 
 ## Multi-account
