@@ -275,35 +275,30 @@ start_background() {
 }
 
 ensure_server() {
-  require_command curl
+  command -v curl >/dev/null 2>&1 || return 1
 
   local url
   url="$(health_url)"
 
   if is_running "$url"; then
-    echo "auth2api already running at $url"
     return 0
   fi
 
-  ensure_build
+  ensure_build >/dev/null 2>&1
 
   local pid
   pid="$(start_background)"
-  echo "Starting auth2api at $url (pid $pid)"
 
   for _ in $(seq 1 50); do
     if is_running "$url"; then
-      echo "auth2api ready at $url"
       return 0
     fi
     if ! kill -0 "$pid" 2>/dev/null; then
-      echo "Error: auth2api exited before becoming ready. See $LOG_DIR/server.log" >&2
       return 1
     fi
     sleep 0.2
   done
 
-  echo "Error: auth2api did not become ready. See $LOG_DIR/server.log" >&2
   return 1
 }
 

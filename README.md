@@ -133,7 +133,7 @@ The repo includes `install.sh`, which writes an `auth2api` runner script to `~/b
 auth2api ensure
 ```
 
-`auth2api ensure` checks the configured `/health` endpoint and exits if the server is already ready. Otherwise it installs dependencies when needed, builds `dist/index.js` when needed, starts `node dist/index.js --config=<repo>/config.yaml` in the background, and waits for the health endpoint to become ready. Background logs are written to `~/.local/state/auth2api/server.log` by default.
+`auth2api ensure` checks the configured `/health` endpoint and exits silently if the server is already ready. Otherwise it installs dependencies when needed, builds `dist/index.js` when needed, starts `node dist/index.js --config=<repo>/config.yaml` in the background, and waits for the health endpoint to become ready. Background logs are written to `~/.local/state/auth2api/server.log` by default.
 
 To remove the runner and the managed `~/.zshrc` ensure block:
 
