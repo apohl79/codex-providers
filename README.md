@@ -126,7 +126,7 @@ The server starts on `http://127.0.0.1:8317` by default. On first run, an API ke
 
 ### Runner install
 
-The repo includes `install.sh`, which writes an `auth2api` runner script to `~/bin` when that directory exists, otherwise to `~/.local/bin`.
+The repo includes `install.sh`, which writes an `auth2api` runner script to `~/bin` when that directory exists, otherwise to `~/.local/bin`. It also adds a managed block to `~/.zshrc` that runs `auth2api ensure` when a new zsh shell starts.
 
 ```bash
 ./install.sh
@@ -134,6 +134,12 @@ auth2api ensure
 ```
 
 `auth2api ensure` checks the configured `/health` endpoint and exits if the server is already ready. Otherwise it installs dependencies when needed, builds `dist/index.js` when needed, starts `node dist/index.js --config=<repo>/config.yaml` in the background, and waits for the health endpoint to become ready. Background logs are written to `~/.local/state/auth2api/server.log` by default.
+
+To remove the runner and the managed `~/.zshrc` ensure block:
+
+```bash
+./install.sh --uninstall
+```
 
 ## Configuration
 
