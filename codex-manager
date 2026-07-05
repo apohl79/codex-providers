@@ -75,6 +75,7 @@ class Draft:
     base_url: str
     selected_models: tuple[str, ...]
     default_model: str
+    fast_model: str
     reasoning_level: str
     context_window: int
     compact_limit: int
@@ -106,6 +107,7 @@ BACKENDS = {
 DEFAULT_CONTEXT_WINDOW = 400000
 DEFAULT_COMPACT_LIMIT = 380000
 DEFAULT_REASONING_LEVEL = "medium"
+CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
 CATALOG_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100
 
 REASONING_LEVELS = (
@@ -140,7 +142,7 @@ CANONICAL_MODEL_ALIASES = {
     "claude-opus-4-7": "claude-opus-4-8",
     "sonnet": "claude-sonnet-5",
     "claude-sonnet-4-6": "claude-sonnet-5",
-    "haiku": "claude-haiku-4-5-20251001",
+    "haiku": CLAUDE_FAST_MODEL,
 }
 
 
@@ -412,6 +414,10 @@ def normalize_models(models: list[str] | tuple[str, ...]) -> list[str]:
             seen.add(normalized)
             result.append(normalized)
     return result
+
+
+def with_required_models(models: tuple[str, ...], required_models: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(normalize_models((*models, *required_models)))
 
 
 def model_identity(backend: Backend, slug: str) -> str:
@@ -808,6 +814,7 @@ def context_content(draft: Draft) -> str:
     return "\n".join(
         [
             f"model = {toml_string(draft.default_model)}",
+            f"model_fast = {toml_string(draft.fast_model)}",
             f"model_provider = {toml_string(draft.provider_id)}",
             f"model_catalog_json = {toml_string(str(draft.catalog_path))}",
             f"model_context_window = {draft.context_window}",
@@ -1084,7 +1091,10 @@ def choose_draft(
         models,
         set(range(len(models))),
     )
-    selected_models = tuple(normalize_models(tuple(models[index] for index in sorted(selected_indexes))))
+    selected_models = with_required_models(
+        tuple(normalize_models(tuple(models[index] for index in sorted(selected_indexes)))),
+        (CLAUDE_FAST_MODEL,),
+    )
 
     default_index = ui.menu(
         "Default Model",
@@ -1137,6 +1147,7 @@ def choose_draft(
         base_url=base_url,
         selected_models=selected_models,
         default_model=default_model,
+        fast_model=CLAUDE_FAST_MODEL,
         reasoning_level=reasoning_level,
         context_window=context_window,
         compact_limit=compact_limit,
@@ -1162,7 +1173,7 @@ def summary_text(draft: Draft, codex_config: Path) -> str:
     return (
         f"{draft.backend.label} provider {draft.provider_id}; context {draft.context_name}; "
         f"{len(draft.selected_models)} models; default {draft.default_model}; "
-        f"reasoning {draft.reasoning_level}; endpoint {draft.base_url}; config {codex_config}"
+        f"fast {draft.fast_model}; reasoning {draft.reasoning_level}; endpoint {draft.base_url}; config {codex_config}"
     )
 
 
@@ -1185,6 +1196,7 @@ def noninteractive_draft(
     default_model = canonical_model(args.model or selected_models[0])
     if default_model not in selected_models:
         selected_models = (default_model, *selected_models)
+    selected_models = with_required_models(selected_models, (CLAUDE_FAST_MODEL,))
     existing = None
     matching_contexts = contexts_for_backend(discover_contexts(codex_home), backend)
     existing = matching_contexts[0] if matching_contexts else None
@@ -1207,6 +1219,7 @@ def noninteractive_draft(
             base_url=base_url,
             selected_models=selected_models,
             default_model=default_model,
+            fast_model=CLAUDE_FAST_MODEL,
             reasoning_level=reasoning_level,
             context_window=context_window,
             compact_limit=compact_limit,
@@ -1301,6 +1314,7 @@ def main() -> int:
         print(f"Would update model catalog: {draft.catalog_path}")
         print(f"Provider: {draft.provider_id} ({draft.display_name})")
         print(f"Models: {', '.join(draft.selected_models)}")
+        print(f"Fast model: {draft.fast_model}")
         print(f"Reasoning level: {draft.reasoning_level}")
         return 0
 

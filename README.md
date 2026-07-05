@@ -373,10 +373,11 @@ The wizard:
 - writes or updates `~/.codex/config.toml`
 - writes `~/.codex/claude.config.toml`
 - writes `~/.codex/claude-models.json`
+- sets `model_fast` to `claude-haiku-4-5-20251001` for Codex side-band tasks
 - lets you choose the default Codex reasoning level for the generated Claude model catalog
 - sets the Codex profile command to `codex -p claude`
 
-The generated profile uses provider id `anthropic`, context name `claude`, and model catalog `~/.codex/claude-models.json`.
+The generated profile uses provider id `anthropic`, context name `claude`, fast model `claude-haiku-4-5-20251001`, and model catalog `~/.codex/claude-models.json`.
 
 Token budget choices in the wizard:
 
