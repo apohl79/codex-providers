@@ -83,6 +83,12 @@ class Draft:
     dry_run: bool
 
 
+@dataclass(frozen=True)
+class AgentDefinition:
+    path: Path
+    content: str
+
+
 BACKENDS = {
     "claude": Backend(
         key="claude",
@@ -108,7 +114,16 @@ DEFAULT_CONTEXT_WINDOW = 400000
 DEFAULT_COMPACT_LIMIT = 380000
 DEFAULT_REASONING_LEVEL = "medium"
 CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
+OPENAI_GENERAL_AGENT_MODEL = "gpt-5.5"
 CATALOG_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100
+
+GENERAL_AGENT_INSTRUCTIONS = """
+You are a general-purpose Codex subagent.
+Follow the concrete task provided in the runtime message.
+Use repository evidence before making claims or edits.
+Keep changes scoped to the assigned task and avoid unrelated refactors.
+Report concise findings, changed files, verification results, and blockers back to the parent agent.
+""".strip()
 
 REASONING_LEVELS = (
     ReasoningLevel(
@@ -477,7 +492,7 @@ Do not use external network access for stable local facts that can be verified i
 
 # Task Management
 
-For non-trivial multi-step work, maintain a visible plan. Keep at most one step in progress. Mark steps completed as soon as they are done, not in a batch at the end. Skip formal plans for tiny one-step tasks where a plan would add noise.
+For non-trivial multi-step work, maintain a visible plan with `update_plan`. Keep exactly one step `in_progress` at a time. Before starting a step, mark it `in_progress`; when it finishes, mark it `completed` and set the next step `in_progress` in the same call. Do not jump a step from `pending` straight to `completed`, and do not batch-complete several steps at the end — emit a separate `update_plan` call at each transition so progress updates incrementally instead of jumping. Skip formal plans for tiny one-step tasks where a plan would add noise.
 
 When you have enough information to act, act. Do not re-derive settled facts, re-litigate decisions already made in the conversation, or present options you will not pursue. If you are weighing choices, recommend one direction and explain the key tradeoff.
 
@@ -824,6 +839,43 @@ def context_content(draft: Draft) -> str:
     )
 
 
+def agent_content(name: str, description: str, model_provider: str, model: str) -> str:
+    return "\n".join(
+        [
+            f"name = {toml_string(name)}",
+            f"description = {toml_string(description)}",
+            f"model_provider = {toml_string(model_provider)}",
+            f"model = {toml_string(model)}",
+            f"developer_instructions = {toml_string(GENERAL_AGENT_INSTRUCTIONS)}",
+            "",
+        ]
+    )
+
+
+def agent_definitions(draft: Draft) -> tuple[AgentDefinition, ...]:
+    agents_dir = draft.context_path.parent / "agents"
+    return (
+        AgentDefinition(
+            path=agents_dir / "general-purpose-gpt.toml",
+            content=agent_content(
+                "general-purpose-gpt",
+                f"General-purpose OpenAI-backed agent using provider openai and model {OPENAI_GENERAL_AGENT_MODEL}.",
+                "openai",
+                OPENAI_GENERAL_AGENT_MODEL,
+            ),
+        ),
+        AgentDefinition(
+            path=agents_dir / "general-purpose-claude.toml",
+            content=agent_content(
+                "general-purpose-claude",
+                f"General-purpose Claude-backed agent using provider {draft.provider_id} and model {draft.default_model}.",
+                draft.provider_id,
+                draft.default_model,
+            ),
+        ),
+    )
+
+
 def backup(path: Path) -> Path | None:
     if not path.exists():
         return None
@@ -839,9 +891,21 @@ def write_files(
     auth2api_config: Path,
     source_catalog: dict,
 ) -> list[Path]:
-    backups = [path for path in (backup(codex_config), backup(draft.context_path), backup(draft.catalog_path)) if path]
+    agents = agent_definitions(draft)
+    backups = [
+        path
+        for path in (
+            backup(codex_config),
+            backup(draft.context_path),
+            backup(draft.catalog_path),
+            *(backup(agent.path) for agent in agents),
+        )
+        if path
+    ]
     codex_config.parent.mkdir(parents=True, exist_ok=True)
     draft.context_path.parent.mkdir(parents=True, exist_ok=True)
+    for agent in agents:
+        agent.path.parent.mkdir(parents=True, exist_ok=True)
     existing_config = codex_config.read_text() if codex_config.exists() else ""
     next_config = f"{remove_provider_blocks(existing_config, draft.provider_id)}\n\n{provider_block(draft, repo_dir, auth2api_config)}\n"
     catalog = build_catalog(
@@ -854,9 +918,13 @@ def write_files(
     codex_config.write_text(next_config)
     draft.context_path.write_text(context_content(draft))
     draft.catalog_path.write_text(json.dumps(catalog, indent=2) + "\n")
+    for agent in agents:
+        agent.path.write_text(agent.content)
     os.chmod(codex_config, 0o600)
     os.chmod(draft.context_path, 0o600)
     os.chmod(draft.catalog_path, 0o600)
+    for agent in agents:
+        os.chmod(agent.path, 0o600)
     return backups
 
 
@@ -1312,6 +1380,8 @@ def main() -> int:
         print(f"Would update Codex config: {codex_config}")
         print(f"Would update context: {draft.context_path}")
         print(f"Would update model catalog: {draft.catalog_path}")
+        for agent in agent_definitions(draft):
+            print(f"Would update agent definition: {agent.path}")
         print(f"Provider: {draft.provider_id} ({draft.display_name})")
         print(f"Models: {', '.join(draft.selected_models)}")
         print(f"Fast model: {draft.fast_model}")
@@ -1329,6 +1399,9 @@ def main() -> int:
     print(f"Updated Codex config: {codex_config}")
     print(f"Updated context file: {draft.context_path}")
     print(f"Updated model catalog: {draft.catalog_path}")
+    print("Updated agent definitions:")
+    for agent in agent_definitions(draft):
+        print(f"  {agent.path}")
     if backups:
         print("Backups:")
         for path in backups:
