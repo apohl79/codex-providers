@@ -11,6 +11,8 @@ import {
   createStreamState,
   anthropicSSEToChat,
   responsesToAnthropic,
+  summarizeResponsesInterAgentInput,
+  ResponsesInterAgentDiagnostics,
   anthropicToResponses,
   makeResponsesState,
   anthropicSSEToResponses,
@@ -18,6 +20,10 @@ import {
 import { handleStreamingResponse, readSseEvents } from "../upstream/streaming";
 import { normalizeCodexResponsesBody } from "../upstream/codex-api";
 import { normalizeCursorResponsesBody } from "../upstream/cursor-api";
+import {
+  providerConsistencyErrorBody,
+  providerConsistencyErrorForInterAgentContent,
+} from "../upstream/inter-agent-content-guard";
 import {
   chatToResponsesRequest,
   responsesToChatCompletion,
@@ -51,6 +57,38 @@ function internalError(resp: ExpressResponse): void {
   } else if (!resp.writableEnded) {
     resp.end();
   }
+}
+
+function logInterAgentDiagnostics(
+  config: Config,
+  phase: string,
+  details: {
+    model: string;
+    provider: string;
+    stream: boolean;
+    diagnostics: ResponsesInterAgentDiagnostics;
+    status?: number;
+    completed?: boolean;
+    clientDisconnected?: boolean;
+  },
+): void {
+  if (
+    !isDebugLevel(config.debug, "errors") ||
+    details.diagnostics.agentMessages === 0
+  ) {
+    return;
+  }
+
+  const { diagnostics } = details;
+  console.error(
+    `[diagnostic:inter-agent] phase=${phase} route=/v1/responses provider=${details.provider} model=${details.model} stream=${details.stream} agent_messages=${diagnostics.agentMessages} text_parts=${diagnostics.textParts} encrypted_parts=${diagnostics.encryptedParts} plaintext_encrypted_parts=${diagnostics.plaintextEncryptedParts} fernet_encrypted_parts=${diagnostics.fernetEncryptedParts} plaintext_encrypted_chars=${diagnostics.plaintextEncryptedChars} output_chars=${diagnostics.outputChars}${details.status === undefined ? "" : ` upstream_status=${details.status}`}${details.completed === undefined ? "" : ` completed=${details.completed}`}${details.clientDisconnected === undefined ? "" : ` client_disconnected=${details.clientDisconnected}`}`,
+  );
+
+  diagnostics.items.forEach((item) => {
+    console.error(
+      `[diagnostic:inter-agent:item] phase=${phase} index=${item.index} author=${item.author || "<missing>"} recipient=${item.recipient || "<missing>"} text_parts=${item.textParts} encrypted_parts=${item.encryptedParts} plaintext_encrypted_parts=${item.plaintextEncryptedParts} fernet_encrypted_parts=${item.fernetEncryptedParts} output_chars=${item.outputChars}`,
+    );
+  });
 }
 
 /**
@@ -204,6 +242,17 @@ async function proxyCodexResponses(args: {
   stream: boolean;
 }): Promise<void> {
   const { req, resp, config, provider, body, model, stream } = args;
+  const interAgentContentError = providerConsistencyErrorForInterAgentContent(
+    body,
+    { targetProvider: provider.id },
+  );
+  if (interAgentContentError) {
+    resp
+      .status(interAgentContentError.status)
+      .json(providerConsistencyErrorBody(interAgentContentError));
+    return;
+  }
+
   const responsesBody = normalizeCodexResponsesBody(body);
   delete responsesBody.max_output_tokens;
   delete responsesBody.parallel_tool_calls;
@@ -679,11 +728,18 @@ export function createResponsesHandler(
       const structured =
         body.text?.format?.type === "json_object" ||
         body.text?.format?.type === "json_schema";
+      const interAgentDiagnostics = summarizeResponsesInterAgentInput(body);
+      logInterAgentDiagnostics(config, "translated-request", {
+        model,
+        provider: provider.id,
+        stream: clientWantsStream,
+        diagnostics: interAgentDiagnostics,
+      });
       const translatedBody = responsesToAnthropic(body);
 
       await proxyWithRetry("Responses", resp, config, {
         manager: provider.manager,
-        upstream: (account, signal) => {
+        upstream: async (account, signal) => {
           const cloaked =
             provider.applyCloaking?.({
               body: translatedBody,
@@ -691,7 +747,13 @@ export function createResponsesHandler(
               account,
               config,
             }) ?? translatedBody;
-          return provider.callMessages({
+          logInterAgentDiagnostics(config, "upstream-start", {
+            model,
+            provider: provider.id,
+            stream: clientWantsStream,
+            diagnostics: interAgentDiagnostics,
+          });
+          const upstream = await provider.callMessages({
             body: cloaked,
             request: req,
             account,
@@ -699,6 +761,14 @@ export function createResponsesHandler(
             signal,
             structured,
           });
+          logInterAgentDiagnostics(config, "upstream-response", {
+            model,
+            provider: provider.id,
+            stream: clientWantsStream,
+            diagnostics: interAgentDiagnostics,
+            status: upstream.status,
+          });
+          return upstream;
         },
         success: async (upstream, account) => {
           if (clientWantsStream) {
@@ -706,6 +776,14 @@ export function createResponsesHandler(
             const streamResp = await handleStreamingResponse(upstream, resp, {
               onEvent: (event, data, usage) =>
                 anthropicSSEToResponses(event, data, state, model, usage),
+            });
+            logInterAgentDiagnostics(config, "stream-finished", {
+              model,
+              provider: provider.id,
+              stream: clientWantsStream,
+              diagnostics: interAgentDiagnostics,
+              completed: streamResp.completed,
+              clientDisconnected: streamResp.clientDisconnected,
             });
             if (streamResp.completed) {
               provider.manager.recordSuccess(
@@ -725,6 +803,14 @@ export function createResponsesHandler(
             provider.manager.recordSuccess(account.token.email, usage);
             tagStatsUsage(resp, usage);
             resp.json(anthropicToResponses(anthropicResp, model));
+            logInterAgentDiagnostics(config, "json-finished", {
+              model,
+              provider: provider.id,
+              stream: clientWantsStream,
+              diagnostics: interAgentDiagnostics,
+              completed: true,
+              clientDisconnected: false,
+            });
           }
         },
         errorAdapter: openaiErrorBody,

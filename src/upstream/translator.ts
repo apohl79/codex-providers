@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { UsageData } from "../accounts/manager";
+import { isFernetToken } from "./inter-agent-content-guard";
 
 function compactUuid(): string {
   return uuidv4().replace(/-/g, "");
@@ -555,13 +556,145 @@ function extractText(content: any): string {
   return "";
 }
 
+function joinAgentMessageText(parts: string[]): string {
+  return parts.reduce((joined, part) => {
+    if (!joined) return part;
+    if (joined.endsWith("\n") || part.startsWith("\n"))
+      return `${joined}${part}`;
+    return `${joined}\n${part}`;
+  }, "");
+}
+
+function readableEncryptedAgentContent(value: unknown): string {
+  return typeof value === "string"
+    ? isFernetToken(value)
+      ? "[encrypted inter-agent content]"
+      : value
+    : "";
+}
+
+export type AgentMessageDiagnostic = Readonly<{
+  index: number;
+  author: string;
+  recipient: string;
+  textParts: number;
+  encryptedParts: number;
+  plaintextEncryptedParts: number;
+  fernetEncryptedParts: number;
+  plaintextEncryptedChars: number;
+  fernetEncryptedChars: number;
+  outputChars: number;
+}>;
+
+export type ResponsesInterAgentDiagnostics = Readonly<{
+  agentMessages: number;
+  textParts: number;
+  encryptedParts: number;
+  plaintextEncryptedParts: number;
+  fernetEncryptedParts: number;
+  plaintextEncryptedChars: number;
+  fernetEncryptedChars: number;
+  outputChars: number;
+  items: AgentMessageDiagnostic[];
+}>;
+
+function agentMessageContentParts(content: any): any[] {
+  return typeof content === "string"
+    ? [{ type: "text", text: content }]
+    : Array.isArray(content)
+      ? content
+      : [];
+}
+
+function summarizeAgentMessage(
+  item: any,
+  index: number,
+): AgentMessageDiagnostic {
+  const parts = agentMessageContentParts(item.content);
+  const encryptedParts = parts.filter(
+    (part) => part?.type === "encrypted_content",
+  );
+  const encryptedValues = encryptedParts
+    .map((part) => part?.encrypted_content)
+    .filter((value) => typeof value === "string");
+  const plaintextEncryptedValues = encryptedValues.filter(
+    (value) => !isFernetToken(value),
+  );
+  const fernetEncryptedValues = encryptedValues.filter(isFernetToken);
+
+  return {
+    index,
+    author: typeof item.author === "string" ? item.author : "",
+    recipient: typeof item.recipient === "string" ? item.recipient : "",
+    textParts: parts.filter((part) => part?.type !== "encrypted_content")
+      .length,
+    encryptedParts: encryptedParts.length,
+    plaintextEncryptedParts: plaintextEncryptedValues.length,
+    fernetEncryptedParts: fernetEncryptedValues.length,
+    plaintextEncryptedChars: plaintextEncryptedValues.reduce(
+      (total, value) => total + value.length,
+      0,
+    ),
+    fernetEncryptedChars: fernetEncryptedValues.reduce(
+      (total, value) => total + value.length,
+      0,
+    ),
+    outputChars: extractAgentMessageText(item.content).length,
+  };
+}
+
+export function summarizeResponsesInterAgentInput(
+  body: any,
+): ResponsesInterAgentDiagnostics {
+  const items: AgentMessageDiagnostic[] = (
+    Array.isArray(body?.input) ? body.input : []
+  )
+    .map((item: any, index: number) =>
+      item?.type === "agent_message"
+        ? summarizeAgentMessage(item, index)
+        : null,
+    )
+    .filter(
+      (item: AgentMessageDiagnostic | null): item is AgentMessageDiagnostic =>
+        item !== null,
+    );
+
+  return {
+    agentMessages: items.length,
+    textParts: items.reduce((total, item) => total + item.textParts, 0),
+    encryptedParts: items.reduce(
+      (total, item) => total + item.encryptedParts,
+      0,
+    ),
+    plaintextEncryptedParts: items.reduce(
+      (total, item) => total + item.plaintextEncryptedParts,
+      0,
+    ),
+    fernetEncryptedParts: items.reduce(
+      (total, item) => total + item.fernetEncryptedParts,
+      0,
+    ),
+    plaintextEncryptedChars: items.reduce(
+      (total, item) => total + item.plaintextEncryptedChars,
+      0,
+    ),
+    fernetEncryptedChars: items.reduce(
+      (total, item) => total + item.fernetEncryptedChars,
+      0,
+    ),
+    outputChars: items.reduce((total, item) => total + item.outputChars, 0),
+    items,
+  };
+}
+
 // Codex inter-agent items arrive as `type: "agent_message"` with a `content`
-// array of `input_text` / `encrypted_content` parts. Flatten the readable text
-// so the message survives translation instead of being silently dropped.
+// array of `input_text` / `encrypted_content` parts. ChatGPT-backed parents
+// produce real Fernet tokens, but non-ChatGPT parents can store plaintext in
+// the same `encrypted_content` transport field.
 function extractAgentMessageText(content: any): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    return content
+    const parts = content
       .map((p: any) => {
         if (
           p?.type === "input_text" ||
@@ -571,12 +704,12 @@ function extractAgentMessageText(content: any): string {
           return p.text || "";
         }
         if (p?.type === "encrypted_content") {
-          return "[encrypted inter-agent content]";
+          return readableEncryptedAgentContent(p.encrypted_content);
         }
         return p?.text || "";
       })
-      .filter((t: string) => t.length > 0)
-      .join("\n");
+      .filter((t: string) => t.length > 0);
+    return joinAgentMessageText(parts);
   }
   return "";
 }

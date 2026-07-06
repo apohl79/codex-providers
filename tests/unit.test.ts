@@ -16,12 +16,23 @@ import {
   createStreamState,
   anthropicSSEToChat,
   responsesToAnthropic,
+  summarizeResponsesInterAgentInput,
   anthropicToResponses,
   makeResponsesState,
   anthropicSSEToResponses,
 } from "../src/upstream/translator";
 import { loadConfig, isDebugLevel, resolveAuthDir } from "../src/config";
 import { UsageData } from "../src/accounts/manager";
+
+function structurallyValidFernetTokenForTests(): string {
+  return Buffer.concat([
+    Buffer.from([0x80]),
+    Buffer.alloc(8),
+    Buffer.alloc(16),
+    Buffer.alloc(16),
+    Buffer.alloc(32),
+  ]).toString("base64url");
+}
 
 // ══════════════════════════════════════════════════
 // utils/common.ts
@@ -200,11 +211,10 @@ test("handleStreamingResponse flushes the final un-terminated SSE event through 
   const result = await handleStreamingResponse(upstream, resp, {
     onEvent: (event, data) => {
       observed.push({ event, data });
-      // Emit the equivalent of a finish chunk on completed.
-      if (event === "response.completed") {
-        return ["data: [DONE]\n\n"];
-      }
-      return [];
+      const chunksByEvent: Record<string, string[]> = {
+        "response.completed": ["data: [DONE]\n\n"],
+      };
+      return chunksByEvent[event] || [];
     },
   });
 
@@ -954,7 +964,7 @@ test("responsesToAnthropic maps agent_message items to assistant messages", () =
   ]);
 });
 
-test("responsesToAnthropic marks encrypted agent_message content", () => {
+test("responsesToAnthropic passes plaintext agent_message encrypted_content to Anthropic", () => {
   const result = responsesToAnthropic({
     model: "opus-4.8",
     input: [
@@ -963,7 +973,38 @@ test("responsesToAnthropic marks encrypted agent_message content", () => {
         type: "agent_message",
         author: "/root/child",
         recipient: "/root",
-        content: [{ type: "encrypted_content", encrypted_content: "AAAA" }],
+        content: [
+          {
+            type: "input_text",
+            text: "Message Type: NEW_TASK\nTask name: /root/child\nSender: /root\nPayload:\n",
+          },
+          { type: "encrypted_content", encrypted_content: "review this" },
+        ],
+      },
+    ],
+  });
+  assert.equal(result.messages[1].role, "assistant");
+  assert.equal(
+    result.messages[1].content[0].text,
+    "Message Type: NEW_TASK\nTask name: /root/child\nSender: /root\nPayload:\nreview this",
+  );
+});
+
+test("responsesToAnthropic masks Fernet agent_message encrypted_content", () => {
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    input: [
+      { role: "user", content: "start" },
+      {
+        type: "agent_message",
+        author: "/root/child",
+        recipient: "/root",
+        content: [
+          {
+            type: "encrypted_content",
+            encrypted_content: structurallyValidFernetTokenForTests(),
+          },
+        ],
       },
     ],
   });
@@ -972,6 +1013,59 @@ test("responsesToAnthropic marks encrypted agent_message content", () => {
     result.messages[1].content[0].text,
     "[encrypted inter-agent content]",
   );
+});
+
+test("summarizeResponsesInterAgentInput reports redacted content diagnostics", () => {
+  const result = summarizeResponsesInterAgentInput({
+    input: [
+      { role: "user", content: "start" },
+      {
+        type: "agent_message",
+        author: "/root",
+        recipient: "/root/worker",
+        content: [
+          {
+            type: "input_text",
+            text: "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n",
+          },
+          { type: "encrypted_content", encrypted_content: "review this" },
+          {
+            type: "encrypted_content",
+            encrypted_content: structurallyValidFernetTokenForTests(),
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    agentMessages: 1,
+    textParts: 1,
+    encryptedParts: 2,
+    plaintextEncryptedParts: 1,
+    fernetEncryptedParts: 1,
+    plaintextEncryptedChars: "review this".length,
+    fernetEncryptedChars: structurallyValidFernetTokenForTests().length,
+    outputChars:
+      "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\nreview this\n[encrypted inter-agent content]"
+        .length,
+    items: [
+      {
+        index: 1,
+        author: "/root",
+        recipient: "/root/worker",
+        textParts: 1,
+        encryptedParts: 2,
+        plaintextEncryptedParts: 1,
+        fernetEncryptedParts: 1,
+        plaintextEncryptedChars: "review this".length,
+        fernetEncryptedChars: structurallyValidFernetTokenForTests().length,
+        outputChars:
+          "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\nreview this\n[encrypted inter-agent content]"
+            .length,
+      },
+    ],
+  });
 });
 
 test("responsesToAnthropic appends user continuation when thinking ends on assistant prefill", () => {
@@ -1319,6 +1413,28 @@ function makeStatsEvent(over: Partial<StatsEvent> = {}): StatsEvent {
   };
 }
 
+function createStatsTestApp(tmp: string, recorder: StatsRecorder): any {
+  return createServer(
+    {
+      host: "",
+      port: 0,
+      "auth-dir": tmp,
+      "api-keys": new Set(["sk-test"]),
+      "body-limit": "1mb",
+      cloaking: {},
+      timeouts: {
+        "messages-ms": 1000,
+        "stream-messages-ms": 1000,
+        "count-tokens-ms": 1000,
+      },
+      stats: { enabled: true },
+      debug: "off",
+    } as any,
+    {} as any,
+    recorder,
+  );
+}
+
 test("StatsRecorder aggregates across all three views", () => {
   const recorder = new StatsRecorder();
   recorder.applyEvent(makeStatsEvent());
@@ -1388,25 +1504,7 @@ test("createServer stats endpoint records mounted route prefix", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-stats-"));
   const recorder = new StatsRecorder();
   recorder.start(tmp);
-  const app = createServer(
-    {
-      host: "",
-      port: 0,
-      "auth-dir": tmp,
-      "api-keys": new Set(["sk-test"]),
-      "body-limit": "1mb",
-      cloaking: {},
-      timeouts: {
-        "messages-ms": 1000,
-        "stream-messages-ms": 1000,
-        "count-tokens-ms": 1000,
-      },
-      stats: { enabled: true },
-      debug: "off",
-    } as any,
-    {} as any,
-    recorder,
-  );
+  const app = createStatsTestApp(tmp, recorder);
   const server = app.listen(0);
   try {
     const port = (server.address() as any).port;
@@ -1428,31 +1526,13 @@ test("createServer stats records client disconnects on close", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-stats-"));
   const recorder = new StatsRecorder();
   recorder.start(tmp);
-  const app = createServer(
-    {
-      host: "",
-      port: 0,
-      "auth-dir": tmp,
-      "api-keys": new Set(["sk-test"]),
-      "body-limit": "1mb",
-      cloaking: {},
-      timeouts: {
-        "messages-ms": 1000,
-        "stream-messages-ms": 1000,
-        "count-tokens-ms": 1000,
-      },
-      stats: { enabled: true },
-      debug: "off",
-    } as any,
-    {} as any,
-    recorder,
-  );
+  const app = createStatsTestApp(tmp, recorder);
   let resolveReached!: () => void;
   const reached = new Promise<void>((resolve) => {
     resolveReached = resolve;
   });
   app.get("/v1/hang", (_req, res) => {
-    if (res.locals.stats) res.locals.stats.model = "hang";
+    res.locals.stats.model = "hang";
     resolveReached();
     // Intentionally never write a response; the client abort below should
     // hit the stats close-path rather than finish-path.
