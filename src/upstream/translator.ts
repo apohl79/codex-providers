@@ -555,6 +555,32 @@ function extractText(content: any): string {
   return "";
 }
 
+// Codex inter-agent items arrive as `type: "agent_message"` with a `content`
+// array of `input_text` / `encrypted_content` parts. Flatten the readable text
+// so the message survives translation instead of being silently dropped.
+function extractAgentMessageText(content: any): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p: any) => {
+        if (
+          p?.type === "input_text" ||
+          p?.type === "output_text" ||
+          p?.type === "text"
+        ) {
+          return p.text || "";
+        }
+        if (p?.type === "encrypted_content") {
+          return "[encrypted inter-agent content]";
+        }
+        return p?.text || "";
+      })
+      .filter((t: string) => t.length > 0)
+      .join("\n");
+  }
+  return "";
+}
+
 function convertResponsesPart(part: any, role: string): any[] {
   if (!part || !part.type) return [];
 
@@ -690,6 +716,18 @@ export function responsesToAnthropic(body: any): any {
       }
     }
 
+    // Codex inter-agent messages: `type: "agent_message"` carries assistant-role
+    // commentary between agents. Without this branch the loop drops it entirely.
+    if (item.type === "agent_message") {
+      const text = extractAgentMessageText(item.content);
+      if (text) {
+        messages.push({
+          role: "assistant",
+          content: [{ type: "text", text }],
+        });
+      }
+    }
+
     if (
       item.type === "function_call_output" ||
       item.type === "custom_tool_call_output"
@@ -731,6 +769,26 @@ export function responsesToAnthropic(body: any): any {
         ],
       });
     }
+  }
+
+  // Anthropic rejects a trailing assistant "prefill" turn when extended thinking
+  // is enabled: the model must open the turn with a thinking block. Codex ends
+  // follow-up/inter-agent turns on assistant content, so append a minimal user
+  // continuation to keep the request valid without discarding history.
+  const lastMessage = messages[messages.length - 1];
+  const lastEndsWithToolUse =
+    Array.isArray(lastMessage?.content) &&
+    lastMessage.content.some((block: any) => block?.type === "tool_use");
+  if (
+    anthropicBody.thinking?.type === "enabled" &&
+    lastMessage &&
+    lastMessage.role === "assistant" &&
+    !lastEndsWithToolUse
+  ) {
+    messages.push({
+      role: "user",
+      content: [{ type: "text", text: "Continue." }],
+    });
   }
 
   anthropicBody.messages = messages;

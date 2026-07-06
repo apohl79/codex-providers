@@ -927,6 +927,123 @@ test("responsesToAnthropic translates custom tool call history", () => {
   ]);
 });
 
+test("responsesToAnthropic maps agent_message items to assistant messages", () => {
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    input: [
+      { role: "user", content: "start" },
+      {
+        type: "agent_message",
+        author: "/root/child",
+        recipient: "/root",
+        content: [
+          { type: "input_text", text: "Message Type: MESSAGE\nPayload:" },
+          { type: "input_text", text: "done" },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(result.messages, [
+    { role: "user", content: "start" },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Message Type: MESSAGE\nPayload:\ndone" },
+      ],
+    },
+  ]);
+});
+
+test("responsesToAnthropic marks encrypted agent_message content", () => {
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    input: [
+      { role: "user", content: "start" },
+      {
+        type: "agent_message",
+        author: "/root/child",
+        recipient: "/root",
+        content: [{ type: "encrypted_content", encrypted_content: "AAAA" }],
+      },
+    ],
+  });
+  assert.equal(result.messages[1].role, "assistant");
+  assert.equal(
+    result.messages[1].content[0].text,
+    "[encrypted inter-agent content]",
+  );
+});
+
+test("responsesToAnthropic appends user continuation when thinking ends on assistant prefill", () => {
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    reasoning: { effort: "high" },
+    input: [
+      { role: "user", content: "hi" },
+      {
+        type: "agent_message",
+        author: "/root/child",
+        recipient: "/root",
+        content: [{ type: "input_text", text: "sub-agent report" }],
+      },
+    ],
+  });
+  assert.equal(result.thinking.type, "enabled");
+  assert.deepEqual(result.messages, [
+    { role: "user", content: "hi" },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "sub-agent report" }],
+    },
+    { role: "user", content: [{ type: "text", text: "Continue." }] },
+  ]);
+});
+
+test("responsesToAnthropic leaves trailing user turn untouched with thinking", () => {
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    reasoning: { effort: "high" },
+    input: [{ role: "user", content: "hi" }],
+  });
+  assert.equal(result.thinking.type, "enabled");
+  assert.deepEqual(result.messages, [{ role: "user", content: "hi" }]);
+});
+
+test("responsesToAnthropic keeps assistant prefill when thinking is disabled", () => {
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    input: [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "partial answer" },
+    ],
+  });
+  assert.equal(result.thinking, undefined);
+  assert.deepEqual(result.messages, [
+    { role: "user", content: "hi" },
+    { role: "assistant", content: "partial answer" },
+  ]);
+});
+
+test("responsesToAnthropic does not append continuation after unanswered tool_use", () => {
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    reasoning: { effort: "high" },
+    input: [
+      { role: "user", content: "hi" },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "exec_command",
+        arguments: "{}",
+      },
+    ],
+  });
+  assert.equal(result.thinking.type, "enabled");
+  const last = result.messages[result.messages.length - 1];
+  assert.equal(last.role, "assistant");
+  assert.equal(last.content[0].type, "tool_use");
+});
+
 test("anthropicToResponses translates basic response", () => {
   const result = anthropicToResponses(
     {
