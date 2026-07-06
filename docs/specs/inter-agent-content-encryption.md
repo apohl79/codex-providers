@@ -2,7 +2,7 @@
 
 # Spec: Inter-Agent Content-Encryption Endpoint
 
-Status: Draft
+Status: Draft — decision made (Option A)
 Owner: unassigned
 Scope: `src/handlers`, `src/upstream`, `src/providers` (anthropic + codex paths)
 
@@ -85,63 +85,60 @@ content, so `multi_agent_v2` works across mixed-provider topologies.
 - Whatever auth2api does must keep single-provider topologies
   (openai→openai, anthropic→anthropic) working unchanged.
 
-## 4. Design options
+## 4. Chosen design — Option A: delegate sealing to the ChatGPT backend
 
-Because the real encryption key lives in the ChatGPT backend, there are three
-viable strategies. They are mutually exclusive per deployment; the spec
-recommends Option A.
-
-### Option A — Delegate sealing to the ChatGPT backend (recommended)
+Because the real encryption key lives in the ChatGPT backend and is not available
+to auth2api, the only design that supports a child talking directly to
+`chatgpt.com/backend-api/codex` is to **delegate sealing/unsealing to that same
+backend**. Option A is selected. Options B and C are recorded as rejected
+alternatives in §4.1.
 
 auth2api's **anthropic** provider path detects a Codex inter-agent tool argument
 that must be encrypted and delegates the sealing to the ChatGPT Codex backend via
-the openai/codex account pool, then substitutes the returned token before the
-message reaches the anthropic upstream.
+the existing openai/codex account pool, then substitutes the returned token
+before the message reaches the anthropic upstream. On the reverse path it asks
+the same backend to decrypt tokens the openai-backed child produced before the
+anthropic-backed parent consumes them.
 
 Requirements:
 
-- Identify the sealing endpoint the ChatGPT Codex backend exposes for tool
-  content. This must be confirmed by capturing an openai-provider Codex run's
-  outbound traffic (the backend produces the `gAAAAAB...` token today, so an
-  endpoint or an inline mechanism exists). **This endpoint is currently unknown
-  and is the primary open question — see §7.**
-- A valid ChatGPT/codex account token from the existing codex account pool
-  (`src/accounts`, `src/providers/codex.ts`).
-- On the reverse path, the same backend must decrypt tokens the child produced
-  before the anthropic-backed parent consumes them.
+- **Backend sealing mechanism.** The ChatGPT Codex backend already produces the
+  `gAAAAAB...` token for openai-provider runs, so a sealing capability exists.
+  Its exact surface must be captured before implementation (see §7 Q1); the
+  design assumes a callable seal/unseal path reachable with a codex account
+  token. If the capability turns out to be inline-only, see §4.2.
+- **Account token.** A valid ChatGPT/codex account token from the existing codex
+  account pool (`src/accounts`, `src/providers/codex.ts`) authorizes the
+  seal/unseal calls. Reuse the pool's cooldown/refresh/failover.
+- **Reverse path.** The child→parent reply path unseals via the same backend so
+  the anthropic-backed parent receives readable content.
 
-Risk: depends on an undocumented backend capability. If the backend only seals
-content implicitly (inside `/responses` rather than via a callable endpoint),
-Option A degrades to Option C.
+Risk and dependency: Option A depends on a backend capability that is not yet
+documented; the primary open question (§7 Q1) must be answered before build.
+§4.2 defines the fallback if that capability is not callable.
 
-### Option B — auth2api-owned symmetric envelope (self-contained)
+### 4.1 Rejected alternatives
 
-auth2api seals inter-agent content with its **own** Fernet key when the sender is
-on a provider that would otherwise emit plaintext, and unseals it when the
-recipient is also on auth2api.
+- **Option B — auth2api-owned symmetric envelope.** auth2api seals with its own
+  Fernet key. Rejected as the primary design because it only works when **every**
+  agent traverses auth2api; it cannot satisfy a child that talks to the real
+  ChatGPT backend, which cannot decrypt an auth2api-owned token. Retain only if a
+  deployment forces all agents (including the openai provider) through auth2api.
+- **Option C — provider-consistency guard.** Reject the cross-provider mismatch
+  early with a structured 400 instead of a fix. Not selected as the design, but
+  see §4.2 — it is reused as Option A's degraded fallback.
 
-- Works only when **both** agents traverse auth2api. It cannot satisfy a child
-  that talks to the real ChatGPT backend directly, because that backend cannot
-  decrypt an auth2api-owned token.
-- Requires that all agents in the run route through auth2api (i.e. the openai
-  provider is also proxied by auth2api, not `chatgpt.com` directly).
-- Config: a stable base64 32-byte key in `config.yaml`
-  (`inter-agent-encryption-key`), never logged.
+### 4.2 Fallback if backend sealing is not callable
 
-Use when the deployment forces every agent through auth2api.
+If §7 Q1 reveals the backend only seals content implicitly inside `/responses`
+(no callable seal/unseal surface), auth2api cannot implement Option A and must
+degrade to the Option C guard: on the anthropic path, when the outbound body
+contains an `agent_message` with plaintext `encrypted_content` destined for
+cross-provider delivery, return a structured 400 that explains the
+provider-consistency requirement. This converts an opaque dropped stream into an
+actionable error while the topology stays single-provider.
 
-### Option C — Provider-consistency guard (fallback / immediate mitigation)
-
-If neither sealing option is available, auth2api rejects the mismatch early with a
-clear error instead of letting the ChatGPT backend drop the stream opaquely.
-
-- On the anthropic path, when the outbound body contains an `agent_message`
-  with plaintext `encrypted_content` destined for cross-provider delivery,
-  return a structured 400 explaining the provider-consistency requirement.
-- Not a fix; it converts a confusing transport failure into an actionable error
-  and documents the supported topology (same provider for all agents in a run).
-
-## 5. Endpoint contract (Option A / B)
+## 5. Endpoint contract
 
 A new internal handler encapsulates content sealing/unsealing. It is not a public
 API surface; it is invoked inside the anthropic translation path.
@@ -151,10 +148,13 @@ sealInterAgentContent(plaintext: string, ctx): Promise<string>   // -> gAAAA... 
 openInterAgentContent(token: string, ctx): Promise<string>       // -> plaintext
 ```
 
-- `ctx` carries the account/token needed for Option A, or the configured key for
-  Option B.
-- Both are pure with respect to auth2api state except for the account/key lookup.
-- Errors are typed: `SealUnavailable`, `SealBackendError`, `OpenDecodeError`.
+- `ctx` carries the codex account/token used to authorize the backend
+  seal/unseal calls (from the existing codex account pool).
+- Both are pure with respect to auth2api state except for the account lookup and
+  the backend round-trip.
+- Errors are typed: `SealUnavailable` (backend capability not callable → trigger
+  the §4.2 guard), `SealBackendError` (backend call failed), `OpenDecodeError`
+  (returned token could not be decoded).
 
 ### Where it plugs in
 
@@ -184,11 +184,13 @@ byte `0x80`, assert `len(raw) >= 1 + 8 + 16 + 32` and `(len(raw) - 57) % 16 == 0
 
 ## 7. Open questions (must resolve before implementation)
 
-1. **Backend sealing endpoint (Option A).** What endpoint/mechanism does the
-   ChatGPT Codex backend use to produce the `gAAAAAB...` tool-argument token?
-   Capture an openai-provider Codex `spawn_agent` run's HTTPS traffic to the
-   `chatgpt.com/backend-api/codex` host and record the request/response that
-   yields the token. Until this is known, Option A cannot be built.
+1. **Backend sealing capability (blocking, Option A critical path).** What
+   endpoint/mechanism does the ChatGPT Codex backend use to produce the
+   `gAAAAAB...` tool-argument token, and is it callable independently of a full
+   `/responses` turn? Capture an openai-provider Codex `spawn_agent` run's HTTPS
+   traffic to the `chatgpt.com/backend-api/codex` host and record the
+   request/response that yields the token. If it is callable, Option A proceeds;
+   if it is inline-only, fall back to §4.2. This must be answered before build.
 2. **Reverse path.** Confirm whether child→parent replies also require
    sealing/unsealing, or only the initial task delivery. Rollout evidence shows
    the failure on the child's first turn (task delivery); reply-path behavior is
@@ -196,8 +198,10 @@ byte `0x80`, assert `len(raw) >= 1 + 8 + 16 + 32` and `(len(raw) - 57) % 16 == 0
 3. **Scope of `encrypted_content`.** Confirm that only inter-agent
    `agent_message` content is affected, not reasoning/function-output
    `encrypted_content` on ordinary turns.
-4. **Key custody (Option B).** If self-contained sealing is chosen, decide key
-   rotation and multi-instance sharing.
+4. **Key custody (only if the rejected Option B is later revived).** If a
+   deployment forces all agents through auth2api and adopts self-contained
+   sealing, decide key rotation and multi-instance sharing. Not applicable to the
+   chosen Option A.
 
 ## 8. Acceptance criteria
 
@@ -211,15 +215,17 @@ byte `0x80`, assert `len(raw) >= 1 + 8 + 16 + 32` and `(len(raw) - 57) % 16 == 0
   (Option C) rather than a dropped stream.
 - Encryption keys/tokens never appear in logs or stats.
 - Unit tests cover: detection rule (positive/negative), structural Fernet check,
-  seal/open round-trip (Option B) or backend-delegation mock (Option A), and the
-  cross-provider guard error (Option C).
+  the backend seal/unseal delegation (against a mock backend), and the §4.2
+  degraded-guard error when sealing is unavailable.
 
 ## 9. Test plan
 
 - Unit: Fernet structural validator; detection rule truth table across the three
-  topologies; translator integration for the `agent_message` seal/open hooks.
-- Integration: mock ChatGPT backend that rejects non-Fernet `encrypted_content`
-  (reproduces the current failure) and accepts valid tokens (proves the fix).
+  topologies; translator integration for the `agent_message` seal/unseal hooks;
+  `SealUnavailable` → §4.2 guard path.
+- Integration: mock ChatGPT backend exposing the seal/unseal capability plus a
+  `/responses` that rejects non-Fernet `encrypted_content` (reproduces the
+  current failure) and accepts backend-sealed tokens (proves the fix).
 - Regression: existing `tests/unit.test.ts` `responsesToAnthropic` suite and the
   `tests/responses-translator.test.ts` suite must stay green.
 
