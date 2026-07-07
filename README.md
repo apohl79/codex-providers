@@ -350,9 +350,66 @@ The wizard:
 - writes `~/.codex/claude-models.json`
 - sets `model_fast` to `claude-haiku-4-5-20251001` for Codex side-band tasks
 - lets you choose the default Codex reasoning level for the generated Claude model catalog
+- enables the Codex MultiAgentV2 feature block required for sub-agent handoff
 - sets the Codex profile command to `codex -p claude`
 
 The generated profile uses provider id `anthropic`, context name `claude`, fast model `claude-haiku-4-5-20251001`, and model catalog `~/.codex/claude-models.json`.
+
+### Codex config for sub-agents and cross-provider calls
+
+Codex sub-agent handoff is sensitive to the configured provider identity.
+`codex-manager` writes the required provider and MultiAgentV2 settings. For a
+Claude parent that can spawn or message GPT/Codex child agents, keep the Claude
+profile on a non-OpenAI provider id and run Codex with that generated profile.
+
+In `~/.codex/config.toml`:
+
+```toml
+[features.multi_agent_v2]
+enabled = true
+hide_spawn_agent_metadata = false
+
+[model_providers.anthropic]
+name = "Claude"
+base_url = "http://127.0.0.1:8317/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+stream_idle_timeout_ms = 600000
+
+[model_providers.anthropic.auth]
+# Emit the first api key from this repo's config.yaml. Use an absolute node path
+# if your shell PATH is not available to Codex.
+command = "node"
+args = ["-e", "const fs = require('fs'); const yaml = require('js-yaml'); const cfg = yaml.load(fs.readFileSync('/path/to/auth2api/config.yaml', 'utf8')); const key = cfg?.['api-keys']?.[0]; if (!key) process.exit(1); process.stdout.write(key);"]
+cwd = "/path/to/auth2api"
+timeout_ms = 5000
+refresh_interval_ms = 300000
+```
+
+In `~/.codex/claude.config.toml`:
+
+```toml
+model = "claude-opus-4-8"
+model_fast = "claude-haiku-4-5-20251001"
+model_provider = "anthropic"
+model_catalog_json = "/Users/you/.codex/claude-models.json"
+model_context_window = 400000
+model_auto_compact_token_limit = 380000
+```
+
+The important parts are:
+
+- `model_provider = "anthropic"` must match `[model_providers.anthropic]`.
+- `wire_api = "responses"` is required for the Codex Claude provider.
+- `hide_spawn_agent_metadata = false` is required for reliable multi-agent
+  routing and diagnostics.
+- GPT/Codex sub-agent roles should continue to use the normal OpenAI/Codex
+  provider, while the Claude profile uses the `anthropic` provider above.
+
+Cross-provider Claude→GPT sub-agent calls also require the apohl79 Codex fork,
+or another Codex build with equivalent cross-provider sub-agent support. Older
+upstream Codex builds are not sufficient for this setup.
 
 Token budget choices in the wizard:
 

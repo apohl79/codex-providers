@@ -116,6 +116,7 @@ DEFAULT_REASONING_LEVEL = "medium"
 CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
 OPENAI_GENERAL_AGENT_MODEL = "gpt-5.5"
 CATALOG_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100
+MULTI_AGENT_V2_FEATURE_TABLE = "features.multi_agent_v2"
 
 GENERAL_AGENT_INSTRUCTIONS = """
 You are a general-purpose Codex subagent.
@@ -790,8 +791,7 @@ def fetch_models(base_url: str, api_key: str | None, backend: Backend) -> tuple[
     return list(backend.fallback_models), "Using fallback models; the local server returned no matching models."
 
 
-def remove_provider_blocks(content: str, provider_id: str) -> str:
-    names = {f"model_providers.{provider_id}", f"model_providers.{provider_id}.auth"}
+def remove_toml_blocks(content: str, names: set[str]) -> str:
     output = []
     skip = False
     for line in content.splitlines():
@@ -801,6 +801,23 @@ def remove_provider_blocks(content: str, provider_id: str) -> str:
         if not skip:
             output.append(line)
     return "\n".join(output).rstrip()
+
+
+def remove_provider_blocks(content: str, provider_id: str) -> str:
+    names = {f"model_providers.{provider_id}", f"model_providers.{provider_id}.auth"}
+    return remove_toml_blocks(content, names)
+
+
+def remove_multi_agent_v2_block(content: str) -> str:
+    return remove_toml_blocks(content, {MULTI_AGENT_V2_FEATURE_TABLE})
+
+
+def multi_agent_v2_block() -> str:
+    return f"""
+[{MULTI_AGENT_V2_FEATURE_TABLE}]
+enabled = true
+hide_spawn_agent_metadata = false
+""".strip()
 
 
 def provider_block(draft: Draft, repo_dir: Path, auth2api_config: Path) -> str:
@@ -916,7 +933,11 @@ def write_files(
     for agent in agents:
         agent.path.parent.mkdir(parents=True, exist_ok=True)
     existing_config = codex_config.read_text() if codex_config.exists() else ""
-    next_config = f"{remove_provider_blocks(existing_config, draft.provider_id)}\n\n{provider_block(draft, repo_dir, auth2api_config)}\n"
+    next_config = (
+        f"{remove_multi_agent_v2_block(remove_provider_blocks(existing_config, draft.provider_id))}"
+        f"\n\n{multi_agent_v2_block()}"
+        f"\n\n{provider_block(draft, repo_dir, auth2api_config)}\n"
+    )
     catalog = build_catalog(
         draft.selected_models,
         draft.backend,
