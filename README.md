@@ -350,6 +350,7 @@ The wizard:
 - writes `~/.codex/claude-models.json`
 - sets `model_fast` to `claude-haiku-4-5-20251001` for Codex side-band tasks
 - lets you choose the default Codex reasoning level for the generated Claude model catalog
+- lets you choose the Codex MultiAgentV2 sub-agent concurrency limit
 - enables the Codex MultiAgentV2 feature block required for sub-agent handoff
 - sets the Codex profile command to `codex -p claude`
 
@@ -368,6 +369,7 @@ In `~/.codex/config.toml`:
 [features.multi_agent_v2]
 enabled = true
 hide_spawn_agent_metadata = false
+max_concurrent_threads_per_session = 8
 
 [model_providers.anthropic]
 name = "Claude"
@@ -404,6 +406,9 @@ The important parts are:
 - `wire_api = "responses"` is required for the Codex Claude provider.
 - `hide_spawn_agent_metadata = false` is required for reliable multi-agent
   routing and diagnostics.
+- `max_concurrent_threads_per_session` controls how many sub-agent threads Codex
+  may run concurrently in one session; `codex-manager` asks for this in the
+  wizard and defaults to `8` in non-interactive mode.
 - GPT/Codex sub-agent roles should continue to use the normal OpenAI/Codex
   provider, while the Claude profile uses the `anthropic` provider above.
 
@@ -440,6 +445,9 @@ Non-interactive usage:
 
 # Write with a specific default reasoning level
 ./codex-manager --yes --reasoning-level high
+
+# Write with a specific sub-agent concurrency limit
+./codex-manager --yes --max-concurrent-threads-per-session 8
 
 # Use manual callback URL paste if the browser callback cannot reach localhost
 ./codex-manager --manual-login

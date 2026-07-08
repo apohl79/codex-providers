@@ -79,6 +79,7 @@ class Draft:
     reasoning_level: str
     context_window: int
     compact_limit: int
+    max_concurrent_threads_per_session: int
     catalog_path: Path
     dry_run: bool
 
@@ -113,6 +114,7 @@ BACKENDS = {
 DEFAULT_CONTEXT_WINDOW = 400000
 DEFAULT_COMPACT_LIMIT = 380000
 DEFAULT_REASONING_LEVEL = "medium"
+DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION = 8
 CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
 OPENAI_GENERAL_AGENT_MODEL = "gpt-5.5"
 CATALOG_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100
@@ -348,6 +350,34 @@ def parse_context(path: Path) -> ContextInfo | None:
         context_window=context_window,
         compact_limit=compact_limit,
     )
+
+
+def parse_multi_agent_v2_threads(path: Path) -> int:
+    if not path.exists():
+        return DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION
+    try:
+        data = tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError:
+        return DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION
+    features = data.get("features", {})
+    if not isinstance(features, dict):
+        return DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION
+    multi_agent_v2 = features.get("multi_agent_v2", {})
+    if not isinstance(multi_agent_v2, dict):
+        return DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION
+    value = multi_agent_v2.get("max_concurrent_threads_per_session")
+    return (
+        value
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        else DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION
+    )
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def discover_contexts(codex_home: Path) -> list[ContextInfo]:
@@ -812,11 +842,12 @@ def remove_multi_agent_v2_block(content: str) -> str:
     return remove_toml_blocks(content, {MULTI_AGENT_V2_FEATURE_TABLE})
 
 
-def multi_agent_v2_block() -> str:
+def multi_agent_v2_block(max_concurrent_threads_per_session: int) -> str:
     return f"""
 [{MULTI_AGENT_V2_FEATURE_TABLE}]
 enabled = true
 hide_spawn_agent_metadata = false
+max_concurrent_threads_per_session = {max_concurrent_threads_per_session}
 """.strip()
 
 
@@ -935,7 +966,7 @@ def write_files(
     existing_config = codex_config.read_text() if codex_config.exists() else ""
     next_config = (
         f"{remove_multi_agent_v2_block(remove_provider_blocks(existing_config, draft.provider_id))}"
-        f"\n\n{multi_agent_v2_block()}"
+        f"\n\n{multi_agent_v2_block(draft.max_concurrent_threads_per_session)}"
         f"\n\n{provider_block(draft, repo_dir, auth2api_config)}\n"
     )
     catalog = build_catalog(
@@ -1232,6 +1263,30 @@ def choose_draft(
     if budget_choice == 4:
         context_window, compact_limit = 128000, 121600
 
+    current_max_threads = args.max_concurrent_threads_per_session or parse_multi_agent_v2_threads(codex_config)
+    concurrency_choices = [
+        ("Keep current limit", f"Max concurrent sub-agent threads per session: {current_max_threads}."),
+        ("Conservative", "4 concurrent sub-agent threads per session."),
+        ("Recommended", "8 concurrent sub-agent threads per session."),
+        ("High parallelism", "12 concurrent sub-agent threads per session."),
+        ("Maximum local parallelism", "16 concurrent sub-agent threads per session."),
+    ]
+    concurrency_choice = ui.menu(
+        "Sub-agent Concurrency",
+        "Controls Codex MultiAgentV2 max_concurrent_threads_per_session.",
+        concurrency_choices,
+        0,
+    )
+    max_concurrent_threads_per_session = current_max_threads
+    if concurrency_choice == 1:
+        max_concurrent_threads_per_session = 4
+    if concurrency_choice == 2:
+        max_concurrent_threads_per_session = 8
+    if concurrency_choice == 3:
+        max_concurrent_threads_per_session = 12
+    if concurrency_choice == 4:
+        max_concurrent_threads_per_session = 16
+
     context_name = sanitize_identifier(context_name)
     provider_id = sanitize_identifier(provider_id)
     context_path = codex_home / f"{context_name}.config.toml"
@@ -1249,6 +1304,7 @@ def choose_draft(
         reasoning_level=reasoning_level,
         context_window=context_window,
         compact_limit=compact_limit,
+        max_concurrent_threads_per_session=max_concurrent_threads_per_session,
         catalog_path=catalog_path,
         dry_run=False,
     )
@@ -1271,13 +1327,16 @@ def summary_text(draft: Draft, codex_config: Path) -> str:
     return (
         f"{draft.backend.label} provider {draft.provider_id}; context {draft.context_name}; "
         f"{len(draft.selected_models)} models; default {draft.default_model}; "
-        f"fast {draft.fast_model}; reasoning {draft.reasoning_level}; endpoint {draft.base_url}; config {codex_config}"
+        f"fast {draft.fast_model}; reasoning {draft.reasoning_level}; "
+        f"sub-agent threads {draft.max_concurrent_threads_per_session}; "
+        f"endpoint {draft.base_url}; config {codex_config}"
     )
 
 
 def noninteractive_draft(
     args: argparse.Namespace,
     codex_home: Path,
+    codex_config: Path,
     auth2api_config_path: Path,
 ) -> tuple[Draft, dict]:
     preset = (args.preset or "claude").lower()
@@ -1306,6 +1365,10 @@ def noninteractive_draft(
     context_window = int(args.context_window or (catalog_source_context.context_window if catalog_source_context else DEFAULT_CONTEXT_WINDOW))
     compact_limit = int(args.compact_limit or (catalog_source_context.compact_limit if catalog_source_context else DEFAULT_COMPACT_LIMIT))
     reasoning_level = args.reasoning_level or catalog_default_reasoning_level(source_catalog, selected_models)
+    max_concurrent_threads_per_session = (
+        args.max_concurrent_threads_per_session
+        or parse_multi_agent_v2_threads(codex_config)
+    )
     catalog_path = catalog_path_for_backend(codex_home, backend)
     return (
         Draft(
@@ -1321,6 +1384,7 @@ def noninteractive_draft(
             reasoning_level=reasoning_level,
             context_window=context_window,
             compact_limit=compact_limit,
+            max_concurrent_threads_per_session=max_concurrent_threads_per_session,
             catalog_path=catalog_path,
             dry_run=bool(args.dry_run),
         ),
@@ -1344,6 +1408,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--context-window", type=int, help="Codex model_context_window value.")
     parser.add_argument("--compact-limit", type=int, help="Codex model_auto_compact_token_limit value.")
+    parser.add_argument(
+        "--max-concurrent-threads-per-session",
+        type=positive_int,
+        default=None,
+        help="Codex MultiAgentV2 max_concurrent_threads_per_session value.",
+    )
     parser.add_argument("--codex-home", default=os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
     parser.add_argument("--codex-config", default=os.environ.get("CODEX_CONFIG"))
     parser.add_argument(
@@ -1370,6 +1440,13 @@ def parse_args() -> argparse.Namespace:
         parser.error("--context and --provider are no longer supported.")
     if args.reasoning_level and args.reasoning_level not in REASONING_BY_EFFORT:
         parser.error("--reasoning-level must be one of: " + ", ".join(REASONING_BY_EFFORT))
+    if args.max_concurrent_threads_per_session is None:
+        env_threads = os.environ.get("CODEX_MAX_CONCURRENT_THREADS_PER_SESSION")
+        if env_threads:
+            try:
+                args.max_concurrent_threads_per_session = positive_int(env_threads)
+            except (argparse.ArgumentTypeError, ValueError):
+                parser.error("CODEX_MAX_CONCURRENT_THREADS_PER_SESSION must be a positive integer.")
     return args
 
 
@@ -1393,7 +1470,7 @@ def main() -> int:
     auth_config, server_config_backups, server_config_changed = ensure_api_key(auth2api_config, args.dry_run)
 
     if args.yes or not interactive_tty:
-        draft, source_catalog = noninteractive_draft(args, codex_home, auth2api_config)
+        draft, source_catalog = noninteractive_draft(args, codex_home, codex_config, auth2api_config)
     else:
         def run(stdscr: curses.window) -> tuple[Draft, dict]:
             return choose_draft(CursesUi(stdscr), args, codex_home, codex_config, repo_dir, auth2api_config)
@@ -1416,6 +1493,7 @@ def main() -> int:
         print(f"Models: {', '.join(draft.selected_models)}")
         print(f"Fast model: {draft.fast_model}")
         print(f"Reasoning level: {draft.reasoning_level}")
+        print(f"Max concurrent sub-agent threads: {draft.max_concurrent_threads_per_session}")
         return 0
 
     backups = write_files(draft, codex_config, repo_dir, auth2api_config, source_catalog)
