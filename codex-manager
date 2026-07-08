@@ -992,6 +992,8 @@ def write_files(
 class CursesUi:
     def __init__(self, stdscr: curses.window) -> None:
         self.stdscr = stdscr
+        if hasattr(curses, "set_escdelay"):
+            curses.set_escdelay(25)
         curses.curs_set(0)
         self.stdscr.keypad(True)
         if curses.has_colors():
@@ -1018,6 +1020,40 @@ class CursesUi:
         self.add(2, 3, subtitle)
         self.add(height - 2, 3, "↑/↓ move  Space toggle  Enter continue  q quit", self.color(3))
 
+    def read_key(self) -> int:
+        key = self.stdscr.getch()
+        if key != 27:
+            return key
+        sequence = self.read_escape_sequence()
+        if not sequence:
+            return key
+        final_key = sequence[-1]
+        if sequence[0] in (ord("["), ord("O")):
+            return {
+                ord("A"): curses.KEY_UP,
+                ord("B"): curses.KEY_DOWN,
+                ord("C"): curses.KEY_RIGHT,
+                ord("D"): curses.KEY_LEFT,
+            }.get(final_key, key)
+        return key
+
+    def read_escape_sequence(self) -> tuple[int, ...]:
+        sequence: list[int] = []
+        deadline = time.monotonic() + 0.05
+        self.stdscr.nodelay(True)
+        try:
+            while time.monotonic() < deadline and len(sequence) < 8:
+                key = self.stdscr.getch()
+                if key == -1:
+                    time.sleep(0.005)
+                    continue
+                sequence.append(key)
+                if len(sequence) > 1 and 64 <= key <= 126:
+                    break
+        finally:
+            self.stdscr.nodelay(False)
+        return tuple(sequence)
+
     def menu(self, title: str, subtitle: str, items: list[tuple[str, str]], default: int = 0) -> int:
         selected = default
         while True:
@@ -1028,7 +1064,7 @@ class CursesUi:
                 self.add(y, 5, f"{index + 1}. {label}", attr)
                 self.add(y + 1, 8, description)
                 y += 3
-            key = self.stdscr.getch()
+            key = self.read_key()
             if key in (curses.KEY_UP, ord("k")):
                 selected = (selected - 1) % len(items)
             elif key in (curses.KEY_DOWN, ord("j")):
@@ -1066,7 +1102,7 @@ class CursesUi:
                 attr = self.color(2) | curses.A_BOLD if index == cursor else curses.A_NORMAL
                 self.add(4 + row, 5, f"{mark} {item}", attr)
             self.add(height - 3, 3, f"Selected {len(selected)} of {len(items)}. a all, n none, Space toggle")
-            key = self.stdscr.getch()
+            key = self.read_key()
             if key in (curses.KEY_UP, ord("k")):
                 cursor = (cursor - 1) % len(items)
             elif key in (curses.KEY_DOWN, ord("j")):
