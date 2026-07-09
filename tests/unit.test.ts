@@ -961,6 +961,7 @@ test("responsesToAnthropic maps agent_message items to assistant messages", () =
         { type: "text", text: "Message Type: MESSAGE\nPayload:\ndone" },
       ],
     },
+    { role: "user", content: [{ type: "text", text: "Continue." }] },
   ]);
 });
 
@@ -1068,7 +1069,7 @@ test("summarizeResponsesInterAgentInput reports redacted content diagnostics", (
   });
 });
 
-test("responsesToAnthropic appends user continuation when thinking ends on assistant prefill", () => {
+test("responsesToAnthropic appends user continuation after trailing agent message", () => {
   const result = responsesToAnthropic({
     model: "opus-4.8",
     reasoning: { effort: "high" },
@@ -1103,7 +1104,7 @@ test("responsesToAnthropic leaves trailing user turn untouched with thinking", (
   assert.deepEqual(result.messages, [{ role: "user", content: "hi" }]);
 });
 
-test("responsesToAnthropic keeps assistant prefill when thinking is disabled", () => {
+test("responsesToAnthropic appends user continuation after trailing assistant message", () => {
   const result = responsesToAnthropic({
     model: "opus-4.8",
     input: [
@@ -1115,6 +1116,7 @@ test("responsesToAnthropic keeps assistant prefill when thinking is disabled", (
   assert.deepEqual(result.messages, [
     { role: "user", content: "hi" },
     { role: "assistant", content: "partial answer" },
+    { role: "user", content: [{ type: "text", text: "Continue." }] },
   ]);
 });
 

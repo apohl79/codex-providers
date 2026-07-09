@@ -904,20 +904,14 @@ export function responsesToAnthropic(body: any): any {
     }
   }
 
-  // Anthropic rejects a trailing assistant "prefill" turn when extended thinking
-  // is enabled: the model must open the turn with a thinking block. Codex ends
+  // Claude models reject trailing assistant "prefill" turns. Codex can end
   // follow-up/inter-agent turns on assistant content, so append a minimal user
   // continuation to keep the request valid without discarding history.
   const lastMessage = messages[messages.length - 1];
   const lastEndsWithToolUse =
     Array.isArray(lastMessage?.content) &&
     lastMessage.content.some((block: any) => block?.type === "tool_use");
-  if (
-    anthropicBody.thinking?.type === "enabled" &&
-    lastMessage &&
-    lastMessage.role === "assistant" &&
-    !lastEndsWithToolUse
-  ) {
+  if (lastMessage && lastMessage.role === "assistant" && !lastEndsWithToolUse) {
     messages.push({
       role: "user",
       content: [{ type: "text", text: "Continue." }],
