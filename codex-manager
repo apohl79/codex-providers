@@ -281,8 +281,21 @@ def ensure_api_key(config_path: Path, dry_run: bool) -> tuple[Auth2ApiConfig, li
     return read_auth2api_config(config_path), backups, True
 
 
+def ensure_node_dependencies(repo_dir: Path) -> None:
+    dependency_check = subprocess.run(
+        ["npm", "ls", "--depth=0"],
+        cwd=repo_dir,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if dependency_check.returncode != 0:
+        subprocess.run(["npm", "install"], cwd=repo_dir, check=True)
+
+
 def run_claude_login(repo_dir: Path, config_path: Path, manual: bool) -> None:
     script = repo_dir / "dist" / "index.js"
+    ensure_node_dependencies(repo_dir)
     if not script.exists():
         subprocess.run(["npm", "run", "build"], cwd=repo_dir, check=True)
     command = [
