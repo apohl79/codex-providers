@@ -268,6 +268,17 @@ class DeepSeekBackendTest(unittest.TestCase):
         self.assertEqual(model["shell_type"], "shell_command")
         self.assertEqual(model["truncation_policy"], {"mode": "tokens", "limit": 10000})
 
+    def test_deepseek_catalog_uses_direct_tools_for_anthropic_bridge(self) -> None:
+        catalog = codex_manager.build_catalog(
+            ("deepseek-v4-pro",),
+            codex_manager.BACKENDS["deepseek"],
+            {"models": []},
+            400000,
+            "medium",
+        )
+
+        self.assertEqual(catalog["models"][0]["tool_mode"], "direct")
+
 
 class ProviderMenuTest(unittest.TestCase):
     class FakeUi:
