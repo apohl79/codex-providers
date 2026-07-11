@@ -7,6 +7,7 @@ import { waitForCallback } from "./auth/callback-server";
 import { importCursorTokenFromLocalStorage } from "./auth/cursor/storage";
 import { runCursorBrowserLogin } from "./auth/cursor/browser-oauth";
 import { buildRegistry, ProviderRegistry } from "./providers/registry";
+import { makeDeepSeekApiKeyToken } from "./providers/deepseek";
 import { createServer } from "./server";
 import { notifyServerReload } from "./utils/notify-reload";
 import { StatsRecorder } from "./stats/recorder";
@@ -21,6 +22,55 @@ function prompt(question: string): Promise<string> {
       rl.close();
       resolve(answer.trim());
     });
+  });
+}
+
+function promptSecret(question: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdin.setRawMode) {
+    return Promise.reject(
+      new Error(
+        "DeepSeek API-key login requires an interactive terminal; set DEEPSEEK_API_KEY for non-interactive use",
+      ),
+    );
+  }
+
+  const stdin = process.stdin;
+  const stdout = process.stdout;
+  return new Promise((resolve, reject) => {
+    let value = "";
+    const previousRawMode = stdin.isRaw ?? false;
+
+    const cleanup = () => {
+      stdin.off("data", onData);
+      stdin.setRawMode?.(previousRawMode);
+    };
+
+    const onData = (chunk: Buffer | string) => {
+      for (const character of chunk.toString()) {
+        if (character === "\u0003") {
+          cleanup();
+          stdout.write("\n");
+          reject(new Error("DeepSeek API-key login cancelled"));
+          return;
+        }
+        if (character === "\r" || character === "\n") {
+          cleanup();
+          stdout.write("\n");
+          resolve(value.trim());
+          return;
+        }
+        if (character === "\u007f") {
+          value = value.slice(0, -1);
+        } else {
+          value += character;
+        }
+      }
+    };
+
+    stdout.write(question);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on("data", onData);
   });
 }
 
@@ -80,6 +130,23 @@ async function browserCursorLogin(
   console.log(
     "Note: Cursor provider support is experimental and uses non-public APIs.",
   );
+  await notifyServerReload(config);
+}
+
+async function deepSeekLogin(
+  config: Config,
+  registry: ProviderRegistry,
+): Promise<void> {
+  const apiKeyEnv = config.deepseek?.["api-key-env"] || "DEEPSEEK_API_KEY";
+  const apiKey =
+    process.env[apiKeyEnv]?.trim() ||
+    (await promptSecret("DeepSeek API key: ")).trim();
+  if (!apiKey) throw new Error("DeepSeek API key cannot be empty");
+
+  registry
+    .get("deepseek")
+    .manager.addAccount(makeDeepSeekApiKeyToken(apiKey, apiKeyEnv));
+  console.log("\nDeepSeek API key saved to auth-dir.");
   await notifyServerReload(config);
 }
 
@@ -239,6 +306,8 @@ async function main(): Promise<void> {
       } else {
         await browserCursorLogin(config, registry);
       }
+    } else if (providerId === "deepseek") {
+      await deepSeekLogin(config, registry);
     } else {
       await doLogin(config, registry, providerId, manual);
     }

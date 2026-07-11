@@ -92,8 +92,11 @@ node dist/index.js --login
 # Codex (ChatGPT Plus/Pro)
 node dist/index.js --login --provider=codex
 
-# DeepSeek uses an API key; do not run --login for it.
+# DeepSeek can use an environment variable for non-interactive startup.
 export DEEPSEEK_API_KEY="<your-deepseek-api-key>"
+
+# Or save it interactively in auth-dir (default: ~/.auth2api).
+node dist/index.js --login --provider=deepseek
 
 # Cursor (experimental; opens a browser to authorize your Cursor account)
 node dist/index.js --login --provider=cursor
@@ -211,7 +214,7 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 
 ### Available models
 
-`GET /v1/models` lists only models for providers you've actually logged in to. Claude uses the built-in model set below. The codex list is **fetched live** from `chatgpt.com/backend-api/codex/models` (cached 5 minutes, ETag-aware) so it always matches what your account can actually serve. Cursor models are fetched from Cursor's internal AvailableModels endpoint when possible, with a small fallback list. The current supported set at the time of writing:
+`GET /v1/models` lists only models for providers you've actually configured. DeepSeek API-key login stores a `deepseek-*.json` credential in `auth-dir` with owner-only permissions. Claude uses the built-in model set below. The codex list is **fetched live** from `chatgpt.com/backend-api/codex/models` (cached 5 minutes, ETag-aware) so it always matches what your account can actually serve. Cursor models are fetched from Cursor's internal AvailableModels endpoint when possible, with a small fallback list. The current supported set at the time of writing:
 
 | Model ID                                             | Provider  | Description                                        |
 | ---------------------------------------------------- | --------- | -------------------------------------------------- |

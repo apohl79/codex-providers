@@ -1,6 +1,7 @@
 import { DeepSeekConfig } from "../config";
 import { AccountManager } from "../accounts/manager";
 import { TokenData } from "../auth/types";
+import { loadAllTokens } from "../auth/token-storage";
 import { callAnthropicMessagesWithApiKey } from "../upstream/anthropic-api";
 import { Provider, UpstreamCallContext } from "./types";
 
@@ -9,7 +10,10 @@ const DEFAULT_BASE_URL = "https://api.deepseek.com/anthropic";
 const MODEL_RE = /^deepseek-v4-(pro|flash)$/i;
 const ADVERTISED_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"];
 
-function makeApiKeyToken(apiKey: string, apiKeyEnv: string): TokenData {
+export function makeDeepSeekApiKeyToken(
+  apiKey: string,
+  apiKeyEnv: string = DEFAULT_API_KEY_ENV,
+): TokenData {
   return {
     accessToken: apiKey,
     refreshToken: "",
@@ -36,10 +40,11 @@ export function buildDeepSeekProvider(
   });
 
   const apiKey = process.env[apiKeyEnv]?.trim();
-  if (apiKey) {
+  const storedTokens = loadAllTokens(authDir, "deepseek");
+  if (apiKey && storedTokens.length === 0) {
     // Keep the secret in memory only. In particular, do not use addAccount,
     // which persists accessToken to auth-dir as an OAuth token file.
-    manager.addEphemeralAccount(makeApiKeyToken(apiKey, apiKeyEnv));
+    manager.addEphemeralAccount(makeDeepSeekApiKeyToken(apiKey, apiKeyEnv));
   }
 
   return {
