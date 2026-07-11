@@ -860,13 +860,15 @@ def with_catalog_schema(entry: dict, backend: Backend) -> dict:
         "supports_search_tool": False,
         "use_responses_lite": False,
         "auto_review_model_override": None,
-        # auth2api translates Responses function tools to Anthropic tools. Its
-        # custom freeform code-mode tool is not forwarded to DeepSeek.
-        "tool_mode": "direct" if backend.key == "deepseek" else "code_mode_only",
+        "tool_mode": "code_mode_only",
         "multi_agent_version": "v2",
     }
     for key, value in defaults.items():
         updated.setdefault(key, value)
+    if backend.key == "deepseek":
+        # auth2api translates Responses function tools to Anthropic tools. Its
+        # custom freeform code-mode tool is not forwarded to DeepSeek.
+        updated["tool_mode"] = "direct"
     return updated
 
 

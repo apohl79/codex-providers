@@ -252,7 +252,7 @@ class DeepSeekBackendTest(unittest.TestCase):
         catalog = codex_manager.build_catalog(
             ("deepseek-v4-pro",),
             codex_manager.BACKENDS["deepseek"],
-            {"models": []},
+            {"models": [{"slug": "deepseek-v4-pro", "tool_mode": "code_mode_only"}]},
             400000,
             "medium",
         )
