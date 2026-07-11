@@ -1041,17 +1041,20 @@ refresh_interval_ms = 300000
 
 
 def context_content(draft: Draft) -> str:
-    return "\n".join(
-        [
-            f"model = {toml_string(draft.default_model)}",
-            f"model_fast = {toml_string(draft.fast_model)}",
-            f"model_provider = {toml_string(draft.provider_id)}",
-            f"model_catalog_json = {toml_string(str(draft.catalog_path))}",
-            f"model_context_window = {draft.context_window}",
-            f"model_auto_compact_token_limit = {draft.compact_limit}",
-            "",
-        ]
-    )
+    lines = [
+        f"model = {toml_string(draft.default_model)}",
+        f"model_fast = {toml_string(draft.fast_model)}",
+        f"model_provider = {toml_string(draft.provider_id)}",
+        f"model_catalog_json = {toml_string(str(draft.catalog_path))}",
+        f"model_context_window = {draft.context_window}",
+        f"model_auto_compact_token_limit = {draft.compact_limit}",
+    ]
+    if draft.backend.key == "deepseek":
+        # DeepSeek does not advertise Codex service tiers. Override a global
+        # `priority` default so Codex sends the provider's standard tier.
+        lines.append('service_tier = "default"')
+    lines.append("")
+    return "\n".join(lines)
 
 
 def agent_content(name: str, description: str, model_provider: str, model: str) -> str:

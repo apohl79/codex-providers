@@ -244,6 +244,7 @@ class DeepSeekBackendTest(unittest.TestCase):
             self.assertEqual(draft.default_model, "deepseek-v4-pro")
             self.assertEqual(draft.fast_model, "deepseek-v4-flash")
             self.assertEqual(draft.catalog_path, codex_home / "deepseek-models.json")
+            self.assertIn('service_tier = "default"', codex_manager.context_content(draft))
             provider = codex_manager.provider_block(draft, root, root / "config.yaml")
             self.assertIn("[model_providers.deepseek]", provider)
 
