@@ -1419,6 +1419,16 @@ def ensure_claude_login(
     )
 
 
+def context_budget_choices() -> list[tuple[str, str]]:
+    return [
+        ("Keep current limits", "Context window: {context_window} tokens. Auto-compact threshold: {compact_limit} tokens."),
+        ("1M context", "Context window: 1000000 tokens. Auto-compact threshold: 950000 tokens."),
+        ("Recommended context", "Context window: 400000 tokens. Auto-compact threshold: 380000 tokens."),
+        ("Small context", "Context window: 200000 tokens. Auto-compact threshold: 190000 tokens."),
+        ("Tiny context", "Context window: 128000 tokens. Auto-compact threshold: 121600 tokens."),
+    ]
+
+
 def choose_draft(
     ui: CursesUi,
     args: argparse.Namespace,
@@ -1497,7 +1507,7 @@ def choose_draft(
     current_reasoning_level = args.reasoning_level or catalog_default_reasoning_level(source_catalog, selected_models)
     reasoning_index = ui.menu(
         "Reasoning Level",
-        "Codex uses this as the default reasoning effort for generated Claude catalog entries.",
+        "Codex uses this as the default reasoning effort for generated model catalog entries.",
         [(level.label, level.description) for level in REASONING_LEVELS],
         reasoning_level_index(current_reasoning_level),
     )
@@ -1507,11 +1517,8 @@ def choose_draft(
         "Token Budget",
         "Context window is the total usable token budget. Preset auto-compact thresholds are 95% of that window.",
         [
-            ("Keep current limits", f"Context window: {context_window} tokens. Auto-compact threshold: {compact_limit} tokens."),
-            ("Claude 1M context", "Context window: 1000000 tokens. Auto-compact threshold: 950000 tokens."),
-            ("Recommended Claude context", "Context window: 400000 tokens. Auto-compact threshold: 380000 tokens."),
-            ("Small Claude context", "Context window: 200000 tokens. Auto-compact threshold: 190000 tokens."),
-            ("Tiny Claude context", "Context window: 128000 tokens. Auto-compact threshold: 121600 tokens."),
+            (label, description.format(context_window=context_window, compact_limit=compact_limit))
+            for label, description in context_budget_choices()
         ],
         0,
     )

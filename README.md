@@ -367,7 +367,7 @@ The wizard:
 - writes `~/.codex/claude.config.toml`
 - writes `~/.codex/claude-models.json`
 - sets `model_fast` to `claude-haiku-4-5-20251001` for Codex side-band tasks
-- lets you choose the default Codex reasoning level for the generated Claude model catalog
+- lets you choose the default Codex reasoning level for the generated model catalog
 - lets you choose the Codex MultiAgentV2 sub-agent concurrency limit
 - enables the Codex MultiAgentV2 feature block required for sub-agent handoff
 - sets the Codex profile command to `codex -p claude`
@@ -440,10 +440,10 @@ Token budget choices in the wizard:
 
 | Choice                    | `model_context_window` | `model_auto_compact_token_limit` |
 | ------------------------- | ---------------------- | -------------------------------- |
-| Claude 1M context         | `1000000`              | `950000`                         |
-| Recommended Claude context | `400000`               | `380000`                         |
-| Small Claude context      | `200000`               | `190000`                         |
-| Tiny Claude context       | `128000`               | `121600`                         |
+| 1M context                | `1000000`              | `950000`                         |
+| Recommended context       | `400000`               | `380000`                         |
+| Small context             | `200000`               | `190000`                         |
+| Tiny context              | `128000`               | `121600`                         |
 
 Reasoning level choices in the wizard:
 

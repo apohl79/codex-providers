@@ -290,6 +290,15 @@ class ProviderMenuTest(unittest.TestCase):
         self.assertEqual(top_items[0][2], False)
         self.assertEqual(top_items[1][2], True)
 
+    def test_context_budget_choices_are_provider_neutral(self) -> None:
+        choices = codex_manager.context_budget_choices()
+
+        self.assertEqual(
+            [label for label, _ in choices],
+            ["Keep current limits", "1M context", "Recommended context", "Small context", "Tiny context"],
+        )
+        self.assertFalse(any("Claude" in text for item in choices for text in item))
+
 
 if __name__ == "__main__":
     unittest.main()
