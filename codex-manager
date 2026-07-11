@@ -25,6 +25,7 @@ class Auth2ApiConfig:
     port: int
     auth_dir: str
     api_key: str | None
+    deepseek_api_key_env: str
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class Backend:
     provider_aliases: tuple[str, ...]
     display_name: str
     fallback_models: tuple[str, ...]
+    model_prefixes: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,10 @@ class AgentDefinition:
     content: str
 
 
+CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
+DEEPSEEK_FAST_MODEL = "deepseek-v4-flash"
+
+
 BACKENDS = {
     "claude": Backend(
         key="claude",
@@ -107,6 +113,19 @@ BACKENDS = {
             "claude-haiku-4-5-20251001",
             "claude-haiku-4-5",
         ),
+        model_prefixes=("claude-", "opus-", "sonnet-", "haiku-"),
+    ),
+    "deepseek": Backend(
+        key="deepseek",
+        label="DeepSeek",
+        description="Uses your stored DeepSeek API key. Best for DeepSeek models.",
+        default_context="deepseek",
+        default_provider="deepseek",
+        context_aliases=("deepseek", "local-deepseek"),
+        provider_aliases=("deepseek", "local-deepseek"),
+        display_name="DeepSeek",
+        fallback_models=("deepseek-v4-pro", "deepseek-v4-flash"),
+        model_prefixes=("deepseek-v4-",),
     ),
 }
 
@@ -115,7 +134,6 @@ DEFAULT_CONTEXT_WINDOW = 400000
 DEFAULT_COMPACT_LIMIT = 380000
 DEFAULT_REASONING_LEVEL = "medium"
 DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION = 8
-CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
 OPENAI_GENERAL_AGENT_MODEL = "gpt-5.6-sol"
 CATALOG_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100
 MULTI_AGENT_V2_FEATURE_TABLE = "features.multi_agent_v2"
@@ -197,14 +215,34 @@ def read_auth2api_config(path: Path) -> Auth2ApiConfig:
     port = 8317
     auth_dir = "~/.auth2api"
     api_key: str | None = None
+    deepseek_api_key_env = "DEEPSEEK_API_KEY"
     in_api_keys = False
+    in_deepseek = False
 
     if not path.exists():
-        return Auth2ApiConfig(host=host, port=port, auth_dir=auth_dir, api_key=api_key)
+        return Auth2ApiConfig(
+            host=host,
+            port=port,
+            auth_dir=auth_dir,
+            api_key=api_key,
+            deepseek_api_key_env=deepseek_api_key_env,
+        )
 
     for raw_line in path.read_text().splitlines():
         line = raw_line.strip()
+        indent = len(raw_line) - len(raw_line.lstrip())
         if not line or line.startswith("#"):
+            continue
+        if line == "deepseek:" and indent == 0:
+            in_deepseek = True
+            in_api_keys = False
+            continue
+        if in_deepseek and indent == 0:
+            in_deepseek = False
+        if in_deepseek and line.startswith("api-key-env:"):
+            parsed = unquote(strip_inline_comment(line.split(":", 1)[1]))
+            if parsed:
+                deepseek_api_key_env = parsed
             continue
         if line.startswith("api-keys:"):
             parsed_keys = strip_inline_comment(line.split(":", 1)[1]).strip()
@@ -229,7 +267,13 @@ def read_auth2api_config(path: Path) -> Auth2ApiConfig:
         if line.startswith("auth-dir:"):
             auth_dir = unquote(strip_inline_comment(line.split(":", 1)[1])) or auth_dir
 
-    return Auth2ApiConfig(host=host, port=port, auth_dir=auth_dir, api_key=api_key)
+    return Auth2ApiConfig(
+        host=host,
+        port=port,
+        auth_dir=auth_dir,
+        api_key=api_key,
+        deepseek_api_key_env=deepseek_api_key_env,
+    )
 
 
 def default_base_url(config: Auth2ApiConfig) -> str:
@@ -248,6 +292,10 @@ def resolve_auth_dir(value: str, repo_dir: Path) -> Path:
 
 def has_claude_login(auth_dir: Path) -> bool:
     return any(auth_dir.glob("claude-*.json"))
+
+
+def has_deepseek_login(auth_dir: Path, api_key_env: str) -> bool:
+    return any(auth_dir.glob("deepseek-*.json")) or bool(os.environ.get(api_key_env, "").strip())
 
 
 def insert_api_key(content: str, api_key: str) -> str:
@@ -293,7 +341,7 @@ def ensure_node_dependencies(repo_dir: Path) -> None:
         subprocess.run(["npm", "install"], cwd=repo_dir, check=True)
 
 
-def run_claude_login(repo_dir: Path, config_path: Path, manual: bool) -> None:
+def run_provider_login(repo_dir: Path, config_path: Path, provider_id: str, manual: bool) -> None:
     script = repo_dir / "dist" / "index.js"
     ensure_node_dependencies(repo_dir)
     if not script.exists():
@@ -303,11 +351,19 @@ def run_claude_login(repo_dir: Path, config_path: Path, manual: bool) -> None:
         str(script),
         f"--config={config_path}",
         "--login",
-        "--provider=anthropic",
+        f"--provider={provider_id}",
     ]
     if manual:
         command.append("--manual")
     subprocess.run(command, cwd=repo_dir, check=True)
+
+
+def run_claude_login(repo_dir: Path, config_path: Path, manual: bool) -> None:
+    run_provider_login(repo_dir, config_path, "anthropic", manual)
+
+
+def run_deepseek_login(repo_dir: Path, config_path: Path) -> None:
+    run_provider_login(repo_dir, config_path, "deepseek", False)
 
 
 def read_toml(path: Path) -> dict:
@@ -791,12 +847,11 @@ def build_catalog(
 
 
 def model_matches_backend(model: str, backend: Backend) -> bool:
-    return (
-        model.startswith("claude-")
-        or model.startswith("opus-")
-        or model.startswith("sonnet-")
-        or model.startswith("haiku-")
-    )
+    return any(model.startswith(prefix) for prefix in backend.model_prefixes)
+
+
+def fast_model_for_backend(backend: Backend) -> str:
+    return DEEPSEEK_FAST_MODEL if backend.key == "deepseek" else CLAUDE_FAST_MODEL
 
 
 def filter_models(models: list[str], backend: Backend) -> list[str]:
@@ -924,6 +979,7 @@ def agent_content(name: str, description: str, model_provider: str, model: str) 
 
 def agent_definitions(draft: Draft) -> tuple[AgentDefinition, ...]:
     agents_dir = draft.context_path.parent / "agents"
+    backend_agent_name = sanitize_identifier(draft.backend.key)
     return (
         AgentDefinition(
             path=agents_dir / "general-purpose-gpt.toml",
@@ -935,10 +991,10 @@ def agent_definitions(draft: Draft) -> tuple[AgentDefinition, ...]:
             ),
         ),
         AgentDefinition(
-            path=agents_dir / "general-purpose-claude.toml",
+            path=agents_dir / f"general-purpose-{backend_agent_name}.toml",
             content=agent_content(
-                "general-purpose-claude",
-                f"General-purpose Claude-backed agent using provider {draft.provider_id} and model {draft.default_model}.",
+                f"general-purpose-{backend_agent_name}",
+                f"General-purpose {draft.backend.label}-backed agent using provider {draft.provider_id} and model {draft.default_model}.",
                 draft.provider_id,
                 draft.default_model,
             ),
@@ -1143,20 +1199,20 @@ class CursesUi:
             pass
 
 
-def choose_missing_login_action(auth_dir: Path) -> int:
+def choose_missing_login_action(auth_dir: Path, backend: Backend = BACKENDS["claude"]) -> int:
     def run(stdscr: curses.window) -> int:
         ui = CursesUi(stdscr)
         return ui.menu(
-            "Claude Login",
-            f"No Claude token file was found in {auth_dir}.",
+            f"{backend.label} Login",
+            f"No {backend.label} credential was found in {auth_dir}.",
             [
                 (
-                    "Run Claude login now",
-                    "Opens the auth2api Claude OAuth flow, stores the token, and reloads the running server.",
+                    f"Run {backend.label} login now",
+                    f"Opens the auth2api {backend.label} login flow, stores the credential, and reloads the running server.",
                 ),
                 (
                     "Configure Codex only",
-                    "Writes Codex config now. Requests will fail until a Claude login is added.",
+                    f"Writes Codex config now. Requests will fail until a {backend.label} credential is added.",
                 ),
                 ("Abort", "Exit without changing Codex config."),
             ],
@@ -1166,6 +1222,64 @@ def choose_missing_login_action(auth_dir: Path) -> int:
     return curses.wrapper(run)
 
 
+def ensure_backend_login(
+    args: argparse.Namespace,
+    repo_dir: Path,
+    auth2api_config_path: Path,
+    auth_config: Auth2ApiConfig,
+    interactive_tty: bool,
+    backend: Backend,
+) -> None:
+    if args.skip_login_check:
+        return
+
+    auth_dir = resolve_auth_dir(auth_config.auth_dir, repo_dir)
+    if backend.key == "deepseek":
+        has_login = has_deepseek_login(auth_dir, auth_config.deepseek_api_key_env)
+        credential_pattern = "deepseek-*.json"
+    else:
+        has_login = has_claude_login(auth_dir)
+        credential_pattern = "claude-*.json"
+    if has_login:
+        return
+
+    if args.dry_run:
+        print(f"Would run {backend.label} login: no {credential_pattern} credential exists in {auth_dir}")
+        return
+
+    if args.yes:
+        if not interactive_tty:
+            raise SystemExit(
+                f"Error: no {backend.label} credential found in {auth_dir}. Run codex-manager from a terminal, set {auth_config.deepseek_api_key_env} for DeepSeek, or pass --skip-login-check."
+            )
+        print(f"No {backend.label} credential found in {auth_dir}. Starting {backend.label} login.")
+        if backend.key == "deepseek":
+            run_deepseek_login(repo_dir, auth2api_config_path)
+        else:
+            run_claude_login(repo_dir, auth2api_config_path, args.manual_login)
+    elif interactive_tty:
+        choice = choose_missing_login_action(auth_dir, backend)
+        if choice == 1:
+            return
+        if choice == 2:
+            raise KeyboardInterrupt
+        if backend.key == "deepseek":
+            run_deepseek_login(repo_dir, auth2api_config_path)
+        else:
+            run_claude_login(repo_dir, auth2api_config_path, args.manual_login)
+    else:
+        raise SystemExit(
+            f"Error: no {backend.label} credential found in {auth_dir}. Run codex-manager from a terminal, set {auth_config.deepseek_api_key_env} for DeepSeek, or pass --skip-login-check."
+        )
+
+    if backend.key == "deepseek":
+        completed = has_deepseek_login(auth_dir, auth_config.deepseek_api_key_env)
+    else:
+        completed = has_claude_login(auth_dir)
+    if not completed:
+        raise SystemExit(f"Error: {backend.label} login completed but no credential was found in {auth_dir}.")
+
+
 def ensure_claude_login(
     args: argparse.Namespace,
     repo_dir: Path,
@@ -1173,38 +1287,14 @@ def ensure_claude_login(
     auth_config: Auth2ApiConfig,
     interactive_tty: bool,
 ) -> None:
-    if args.skip_login_check:
-        return
-
-    auth_dir = resolve_auth_dir(auth_config.auth_dir, repo_dir)
-    if has_claude_login(auth_dir):
-        return
-
-    if args.dry_run:
-        print(f"Would run Claude login: no claude-*.json token file exists in {auth_dir}")
-        return
-
-    if args.yes:
-        if not interactive_tty:
-            raise SystemExit(
-                f"Error: no Claude login found in {auth_dir}. Run codex-manager from a terminal or pass --skip-login-check."
-            )
-        print(f"No Claude login found in {auth_dir}. Starting Claude login.")
-        run_claude_login(repo_dir, auth2api_config_path, args.manual_login)
-    elif interactive_tty:
-        choice = choose_missing_login_action(auth_dir)
-        if choice == 1:
-            return
-        if choice == 2:
-            raise KeyboardInterrupt
-        run_claude_login(repo_dir, auth2api_config_path, args.manual_login)
-    else:
-        raise SystemExit(
-            f"Error: no Claude login found in {auth_dir}. Run codex-manager from a terminal or pass --skip-login-check."
-        )
-
-    if not has_claude_login(auth_dir):
-        raise SystemExit(f"Error: Claude login completed but no claude-*.json token file exists in {auth_dir}.")
+    ensure_backend_login(
+        args,
+        repo_dir,
+        auth2api_config_path,
+        auth_config,
+        interactive_tty,
+        BACKENDS["claude"],
+    )
 
 
 def choose_draft(
@@ -1220,7 +1310,7 @@ def choose_draft(
     contexts = discover_contexts(codex_home)
     source_context = parse_context(Path(args.source_context).expanduser()) if args.source_context else None
 
-    backend = BACKENDS["claude"]
+    backend = BACKENDS[(args.preset or "claude").lower()]
     matching_contexts = contexts_for_backend(contexts, backend)
     if len(matching_contexts) > 1:
         context_choice = ui.menu(
@@ -1271,7 +1361,7 @@ def choose_draft(
     )
     selected_models = with_required_models(
         tuple(normalize_models(tuple(models[index] for index in sorted(selected_indexes)))),
-        (CLAUDE_FAST_MODEL,),
+        (fast_model_for_backend(backend),),
     )
 
     default_index = ui.menu(
@@ -1349,7 +1439,7 @@ def choose_draft(
         base_url=base_url,
         selected_models=selected_models,
         default_model=default_model,
-        fast_model=CLAUDE_FAST_MODEL,
+        fast_model=fast_model_for_backend(backend),
         reasoning_level=reasoning_level,
         context_window=context_window,
         compact_limit=compact_limit,
@@ -1389,9 +1479,9 @@ def noninteractive_draft(
     auth2api_config_path: Path,
 ) -> tuple[Draft, dict]:
     preset = (args.preset or "claude").lower()
-    if preset != "claude":
-        raise SystemExit("Error: only the claude preset is supported.")
-    backend = BACKENDS["claude"]
+    if preset not in BACKENDS:
+        raise SystemExit(f"Error: unsupported preset {preset!r}. Supported: {', '.join(BACKENDS)}.")
+    backend = BACKENDS[preset]
     auth_config = read_auth2api_config(auth2api_config_path)
     base_url = normalize_base_url(default_base_url(auth_config))
     models, _ = fetch_models(base_url, auth_config.api_key, backend)
@@ -1402,7 +1492,7 @@ def noninteractive_draft(
     default_model = canonical_model(args.model or selected_models[0])
     if default_model not in selected_models:
         selected_models = (default_model, *selected_models)
-    selected_models = with_required_models(selected_models, (CLAUDE_FAST_MODEL,))
+    selected_models = with_required_models(selected_models, (fast_model_for_backend(backend),))
     existing = None
     matching_contexts = contexts_for_backend(discover_contexts(codex_home), backend)
     existing = matching_contexts[0] if matching_contexts else None
@@ -1429,7 +1519,7 @@ def noninteractive_draft(
             base_url=base_url,
             selected_models=selected_models,
             default_model=default_model,
-            fast_model=CLAUDE_FAST_MODEL,
+            fast_model=fast_model_for_backend(backend),
             reasoning_level=reasoning_level,
             context_window=context_window,
             compact_limit=compact_limit,
@@ -1443,7 +1533,12 @@ def noninteractive_draft(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="codex-manager", description="Manage Codex contexts.")
-    parser.add_argument("--preset", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--preset",
+        choices=tuple(BACKENDS),
+        default=os.environ.get("CODEX_PROVIDER_PRESET", "claude"),
+        help="Backend preset to configure (default: claude).",
+    )
     parser.add_argument("--context", help=argparse.SUPPRESS)
     parser.add_argument("--provider", help=argparse.SUPPRESS)
     parser.add_argument("--display-name", help="Provider display name.")
@@ -1480,11 +1575,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-login-check",
         action="store_true",
-        help="Write Codex config even if no Claude login token is present.",
+        help="Write Codex config even if the selected provider credential is absent.",
     )
     args = parser.parse_args()
-    if args.preset and args.preset.lower() != "claude":
-        parser.error("only the claude preset is supported.")
+    args.preset = args.preset.lower()
     if args.context or args.provider:
         parser.error("--context and --provider are no longer supported.")
     if args.reasoning_level and args.reasoning_level not in REASONING_BY_EFFORT:
@@ -1506,12 +1600,19 @@ def main() -> int:
     codex_config = Path(args.codex_config).expanduser() if args.codex_config else codex_home / "config.toml"
     auth2api_config = Path(args.auth2api_config).expanduser() if args.auth2api_config else repo_dir / "config.yaml"
     if not args.source_context:
-        args.source_context = str(codex_home / "claude.config.toml")
+        args.source_context = str(codex_home / f"{BACKENDS[args.preset].default_context}.config.toml")
 
     interactive_tty = sys.stdin.isatty() and sys.stdout.isatty()
     auth_config = read_auth2api_config(auth2api_config)
     try:
-        ensure_claude_login(args, repo_dir, auth2api_config, auth_config, interactive_tty)
+        ensure_backend_login(
+            args,
+            repo_dir,
+            auth2api_config,
+            auth_config,
+            interactive_tty,
+            BACKENDS[args.preset],
+        )
     except KeyboardInterrupt:
         print("Aborted.")
         return 0

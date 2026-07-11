@@ -346,16 +346,20 @@ Claude Code uses the native `/v1/messages` endpoint which auth2api passes throug
 
 ## Use with Codex
 
-The fork includes `codex-manager`, a curses-based wizard that configures Codex to use this local auth2api server as a Claude provider.
+The fork includes `codex-manager`, a curses-based wizard that configures Codex to use this local auth2api server as a Claude or DeepSeek provider.
 
 ```bash
 ./codex-manager
 codex -p claude
+
+# DeepSeek profile (API key must already be stored or available via DEEPSEEK_API_KEY)
+./codex-manager --preset deepseek --yes
+codex -p deepseek
 ```
 
 The wizard:
 
-- checks for a Claude OAuth token in `auth-dir` and starts the built-in login flow if one is missing
+- checks for the selected provider credential in `auth-dir` and starts the built-in login flow if one is missing
 - ensures `config.yaml` has a local proxy API key
 - reads the server endpoint from `config.yaml` instead of asking for an endpoint manually
 - writes or updates `~/.codex/config.toml`
@@ -368,6 +372,8 @@ The wizard:
 - sets the Codex profile command to `codex -p claude`
 
 The generated profile uses provider id `anthropic`, context name `claude`, fast model `claude-haiku-4-5-20251001`, and model catalog `~/.codex/claude-models.json`.
+
+With `--preset deepseek`, the generated profile uses provider id `deepseek`, context name `deepseek`, fast model `deepseek-v4-flash`, and model catalog `~/.codex/deepseek-models.json`. DeepSeek credentials are stored by `auth2api --login --provider=deepseek` under the configured `auth-dir`.
 
 ### Codex config for sub-agents and cross-provider calls
 
