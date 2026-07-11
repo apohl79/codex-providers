@@ -268,6 +268,16 @@ class ProviderMenuTest(unittest.TestCase):
         self.assertEqual(add_items[0][2], False)
         self.assertEqual(add_items[1][2], True)
 
+    def test_menu_item_parts_accepts_enabled_metadata(self) -> None:
+        self.assertEqual(
+            codex_manager.menu_item_parts(("Claude", "configured", False)),
+            ("Claude", "configured", False),
+        )
+        self.assertEqual(
+            codex_manager.menu_item_parts(("Abort", "Exit")),
+            ("Abort", "Exit", True),
+        )
+
     def test_add_menu_is_disabled_when_both_providers_are_configured(self) -> None:
         ui = self.FakeUi([1, 0])
 

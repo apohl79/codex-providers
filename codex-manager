@@ -103,6 +103,10 @@ class AgentDefinition:
 MenuItem = Union[tuple[str, str], tuple[str, str, bool]]
 
 
+def menu_item_parts(item: MenuItem) -> tuple[str, str, bool]:
+    return item[0], item[1], len(item) < 3 or item[2]
+
+
 CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
 DEEPSEEK_FAST_MODEL = "deepseek-v4-flash"
 
@@ -1117,7 +1121,11 @@ class CursesUi:
         self.stdscr = stdscr
         if hasattr(curses, "set_escdelay"):
             curses.set_escdelay(25)
-        curses.curs_set(0)
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            # Some terminals do not support changing cursor visibility.
+            pass
         self.stdscr.keypad(True)
         if curses.has_colors():
             curses.start_color()
@@ -1179,8 +1187,7 @@ class CursesUi:
 
     def menu(self, title: str, subtitle: str, items: list[MenuItem], default: int = 0) -> int:
         def enabled(index: int) -> bool:
-            item = items[index]
-            return len(item) < 3 or item[2]
+            return menu_item_parts(items[index])[2]
 
         selectable = [index for index in range(len(items)) if enabled(index)]
         if not selectable:
@@ -1189,8 +1196,9 @@ class CursesUi:
         while True:
             self.frame(title, subtitle)
             y = 4
-            for index, (label, description) in enumerate(items):
-                if not enabled(index):
+            for index, item in enumerate(items):
+                label, description, item_enabled = menu_item_parts(item)
+                if not item_enabled:
                     attr = curses.A_DIM
                 else:
                     attr = self.color(2) | curses.A_BOLD if index == selected else curses.A_NORMAL
