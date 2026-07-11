@@ -11,7 +11,15 @@ import shutil
 import subprocess
 import sys
 import time
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError as error:
+        raise SystemExit(
+            "codex-manager requires Python 3.11+ or the 'tomli' package for TOML parsing."
+        ) from error
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
