@@ -87,6 +87,18 @@ class RunClaudeLoginTest(unittest.TestCase):
 
 
 class DeepSeekBackendTest(unittest.TestCase):
+    def _args(self, *, yes: bool = True) -> object:
+        return type(
+            "Args",
+            (),
+            {
+                "skip_login_check": False,
+                "dry_run": False,
+                "yes": yes,
+                "manual_login": False,
+            },
+        )()
+
     def test_read_config_parses_deepseek_api_key_environment_name(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config_path = Path(directory) / "config.yaml"
@@ -132,6 +144,63 @@ class DeepSeekBackendTest(unittest.TestCase):
             codex_manager.run_deepseek_login(repo_dir, config_path)
 
         run.assert_called_once_with(expected_command, cwd=repo_dir, check=True)
+
+    def test_deepseek_preset_does_not_enforce_claude_login(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            auth_dir = Path(directory)
+            auth_config = codex_manager.Auth2ApiConfig(
+                host="127.0.0.1",
+                port=8317,
+                auth_dir=str(auth_dir),
+                api_key="local-key",
+                deepseek_api_key_env="DEEPSEEK_API_KEY",
+            )
+            with (
+                patch.dict(codex_manager.os.environ, {"DEEPSEEK_API_KEY": "configured"}),
+                patch.object(codex_manager, "run_claude_login") as claude_login,
+                patch.object(codex_manager, "run_deepseek_login") as deepseek_login,
+            ):
+                codex_manager.ensure_backend_login(
+                    self._args(),
+                    Path("/tmp/auth2api"),
+                    Path("/tmp/auth2api/config.yaml"),
+                    auth_config,
+                    interactive_tty=False,
+                    backend=codex_manager.BACKENDS["deepseek"],
+                )
+
+            claude_login.assert_not_called()
+            deepseek_login.assert_not_called()
+
+    def test_missing_deepseek_credential_starts_deepseek_login(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            auth_config = codex_manager.Auth2ApiConfig(
+                host="127.0.0.1",
+                port=8317,
+                auth_dir=directory,
+                api_key="local-key",
+                deepseek_api_key_env="DEEPSEEK_API_KEY",
+            )
+            with (
+                patch.dict(codex_manager.os.environ, {}, clear=True),
+                patch.object(codex_manager, "has_deepseek_login", side_effect=[False, True]),
+                patch.object(codex_manager, "run_claude_login") as claude_login,
+                patch.object(codex_manager, "run_deepseek_login") as deepseek_login,
+            ):
+                codex_manager.ensure_backend_login(
+                    self._args(),
+                    Path("/tmp/auth2api"),
+                    Path("/tmp/auth2api/config.yaml"),
+                    auth_config,
+                    interactive_tty=True,
+                    backend=codex_manager.BACKENDS["deepseek"],
+                )
+
+            claude_login.assert_not_called()
+            deepseek_login.assert_called_once_with(
+                Path("/tmp/auth2api"),
+                Path("/tmp/auth2api/config.yaml"),
+            )
 
     def test_noninteractive_draft_generates_deepseek_context(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

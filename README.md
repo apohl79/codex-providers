@@ -352,7 +352,7 @@ The fork includes `codex-manager`, a curses-based wizard that configures Codex t
 ./codex-manager
 codex -p claude
 
-# DeepSeek profile (API key must already be stored or available via DEEPSEEK_API_KEY)
+# DeepSeek profile (starts DeepSeek login if no key is stored or available via DEEPSEEK_API_KEY)
 ./codex-manager --preset deepseek --yes
 codex -p deepseek
 ```
