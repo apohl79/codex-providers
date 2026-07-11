@@ -836,6 +836,38 @@ def catalog_default_reasoning_level(source_catalog: dict, selected_models: tuple
     return DEFAULT_REASONING_LEVEL
 
 
+def with_catalog_schema(entry: dict, backend: Backend) -> dict:
+    """Fill required Codex ModelInfo fields for fallback or older catalogs."""
+    updated = dict(entry)
+    defaults = {
+        "shell_type": "shell_command",
+        "base_instructions": GENERAL_AGENT_INSTRUCTIONS,
+        "supports_reasoning_summaries": False,
+        "support_verbosity": False,
+        "default_verbosity": None,
+        "apply_patch_tool_type": "freeform",
+        "web_search_tool_type": "text",
+        "truncation_policy": {"mode": "tokens", "limit": 10000},
+        "supports_parallel_tool_calls": False,
+        "supports_image_detail_original": False,
+        "experimental_supported_tools": [],
+        "input_modalities": ["text"] if backend.key == "deepseek" else ["text", "image"],
+        "include_skills_usage_instructions": False,
+        "default_reasoning_summary": "none",
+        "additional_speed_tiers": [],
+        "service_tiers": [],
+        "default_service_tier": None,
+        "supports_search_tool": False,
+        "use_responses_lite": False,
+        "auto_review_model_override": None,
+        "tool_mode": "code_mode_only",
+        "multi_agent_version": "v2",
+    }
+    for key, value in defaults.items():
+        updated.setdefault(key, value)
+    return updated
+
+
 def reasoning_level_index(default_reasoning_level: str) -> int:
     for index, level in enumerate(REASONING_LEVELS):
         if level.effort == default_reasoning_level:
@@ -851,7 +883,7 @@ def fallback_model_entry(
     context_window: int,
     default_reasoning_level: str,
 ) -> dict:
-    entry = dict(template or {})
+    entry = with_catalog_schema(dict(template or {}), backend)
     entry.update(
         {
             "slug": slug,
@@ -881,7 +913,7 @@ def build_catalog(
     entries = []
     for index, model in enumerate(selected_models, start=1):
         if model in by_slug:
-            entry = dict(by_slug[model])
+            entry = with_catalog_schema(dict(by_slug[model]), backend)
             entry.update(
                 {
                     "slug": model,

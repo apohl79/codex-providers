@@ -247,6 +247,26 @@ class DeepSeekBackendTest(unittest.TestCase):
             provider = codex_manager.provider_block(draft, root, root / "config.yaml")
             self.assertIn("[model_providers.deepseek]", provider)
 
+    def test_deepseek_catalog_contains_required_codex_model_fields(self) -> None:
+        catalog = codex_manager.build_catalog(
+            ("deepseek-v4-pro",),
+            codex_manager.BACKENDS["deepseek"],
+            {"models": []},
+            400000,
+            "medium",
+        )
+        model = catalog["models"][0]
+        for field in (
+            "shell_type",
+            "base_instructions",
+            "supports_reasoning_summaries",
+            "truncation_policy",
+            "experimental_supported_tools",
+        ):
+            self.assertIn(field, model)
+        self.assertEqual(model["shell_type"], "shell_command")
+        self.assertEqual(model["truncation_policy"], {"mode": "tokens", "limit": 10000})
+
 
 class ProviderMenuTest(unittest.TestCase):
     class FakeUi:
