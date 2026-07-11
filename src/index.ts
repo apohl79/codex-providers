@@ -43,6 +43,7 @@ function promptSecret(question: string): Promise<string> {
     const cleanup = () => {
       stdin.off("data", onData);
       stdin.setRawMode?.(previousRawMode);
+      stdin.pause();
     };
 
     const onData = (chunk: Buffer | string) => {
