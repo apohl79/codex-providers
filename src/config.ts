@@ -49,6 +49,13 @@ export interface StatsConfig {
   enabled: boolean;
 }
 
+export interface DeepSeekConfig {
+  /** Environment variable containing the upstream DeepSeek API key. */
+  "api-key-env": string;
+  /** Anthropic-compatible DeepSeek API base URL. */
+  "base-url": string;
+}
+
 export type DebugMode = "off" | "errors" | "verbose";
 
 export interface Config {
@@ -61,6 +68,8 @@ export interface Config {
   timeouts: TimeoutConfig;
   stats: StatsConfig;
   debug: DebugMode;
+  /** Optional so existing test/config callers remain source-compatible. */
+  deepseek?: DeepSeekConfig;
 }
 
 // Raw config shape from YAML (api-keys is an array, not a Set)
@@ -85,6 +94,10 @@ const DEFAULT_RAW: RawConfig = {
   },
   stats: {
     enabled: true,
+  },
+  deepseek: {
+    "api-key-env": "DEEPSEEK_API_KEY",
+    "base-url": "https://api.deepseek.com/anthropic",
   },
   debug: "off",
 };
@@ -132,6 +145,10 @@ export function loadConfig(configPath?: string): Config {
       cloaking: { ...DEFAULT_RAW.cloaking, ...(parsed.cloaking || {}) },
       timeouts: { ...DEFAULT_RAW.timeouts, ...(parsed.timeouts || {}) },
       stats: { ...DEFAULT_RAW.stats, ...(parsed.stats || {}) },
+      deepseek: {
+        ...DEFAULT_RAW.deepseek,
+        ...(parsed.deepseek || {}),
+      } as DeepSeekConfig,
     };
   }
 

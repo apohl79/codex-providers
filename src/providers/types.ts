@@ -36,9 +36,9 @@ export interface Provider {
   matchesModel(model: string): boolean;
   /** Account pool for this provider. */
   manager: AccountManager;
-  oauth: ProviderOAuthInfo;
-  buildAuthUrl(state: string, pkce: PKCECodes): string;
-  exchangeCode(
+  oauth?: ProviderOAuthInfo;
+  buildAuthUrl?(state: string, pkce: PKCECodes): string;
+  exchangeCode?(
     code: string,
     returnedState: string,
     expectedState: string,

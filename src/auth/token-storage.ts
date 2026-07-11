@@ -9,11 +9,13 @@ const FILENAME_PREFIX: Record<ProviderId, string> = {
   anthropic: "claude",
   codex: "codex",
   cursor: "cursor",
+  deepseek: "deepseek",
 };
 
 function normaliseProvider(type: TokenStorage["type"] | undefined): ProviderId {
   if (type === "cursor") return "cursor";
   if (type === "codex") return "codex";
+  if (type === "deepseek") return "deepseek";
   return "anthropic"; // "claude" or missing → anthropic (legacy files)
 }
 
@@ -99,7 +101,8 @@ export function loadAllTokens(
     return (
       f.startsWith("claude-") ||
       f.startsWith("codex-") ||
-      f.startsWith("cursor-")
+      f.startsWith("cursor-") ||
+      f.startsWith("deepseek-")
     );
   });
   const tokens: TokenData[] = [];

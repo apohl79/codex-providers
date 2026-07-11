@@ -4,6 +4,12 @@ port: 8317
 # Directory to store OAuth tokens
 auth-dir: "~/.auth2api"
 
+# DeepSeek API-key authentication. Keep the key in the environment (or a
+# secrets manager), never in this file.
+deepseek:
+  api-key-env: "DEEPSEEK_API_KEY"
+  base-url: "https://api.deepseek.com/anthropic"
+
 # API keys for client authentication (clients use these to access this proxy)
 api-keys:
   - "your-api-key-here"

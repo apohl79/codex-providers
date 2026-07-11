@@ -304,6 +304,20 @@ export class AccountManager {
   }
 
   addAccount(token: TokenData): void {
+    this.addAccountInMemory(token);
+    saveToken(this.authDir, token);
+  }
+
+  /**
+   * Add a credential that must remain in memory only (for example an API key
+   * supplied through an environment variable). It participates in routing,
+   * cooldowns, and usage accounting without being written to auth-dir.
+   */
+  addEphemeralAccount(token: TokenData): void {
+    this.addAccountInMemory(token);
+  }
+
+  private addAccountInMemory(token: TokenData): void {
     if (!token.provider) token.provider = this.provider;
     if (token.provider !== this.provider) {
       throw new Error(
@@ -327,8 +341,6 @@ export class AccountManager {
       this.accounts.set(token.email, state);
       this.accountOrder.push(token.email);
     }
-
-    saveToken(this.authDir, token);
   }
 
   /**

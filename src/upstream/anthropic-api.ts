@@ -231,6 +231,39 @@ export async function callAnthropicMessages(
   return response;
 }
 
+/**
+ * Call an Anthropic-compatible upstream with a static API key.
+ *
+ * This deliberately does not reuse the Claude OAuth header builder above:
+ * DeepSeek accepts the Anthropic Messages shape, but its compatibility layer
+ * ignores Anthropic beta headers and authenticates with x-api-key.
+ */
+export async function callAnthropicMessagesWithApiKey(
+  options: CallMessagesOptions & { baseUrl: string },
+): Promise<Response> {
+  const { request, account, config, baseUrl } = options;
+  const body = options.body ?? request.body;
+  const stream = !!body.stream;
+  const timeoutMs = stream
+    ? config.timeouts["stream-messages-ms"]
+    : config.timeouts["messages-ms"];
+  const url = `${baseUrl.replace(/\/$/, "")}/v1/messages`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: stream ? "text/event-stream" : "application/json",
+      "anthropic-version": "2023-06-01",
+      "x-api-key": account.token.accessToken,
+    },
+    body: JSON.stringify(body),
+    signal: withTimeoutSignal(timeoutMs, options.signal),
+  });
+
+  return response;
+}
+
 export interface CallCountTokensOptions {
   request: Request;
   account: AvailableAccount;

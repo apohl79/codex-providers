@@ -1,4 +1,4 @@
-export type ProviderId = "anthropic" | "codex" | "cursor";
+export type ProviderId = "anthropic" | "codex" | "cursor" | "deepseek";
 
 export interface PKCECodes {
   codeVerifier: string;

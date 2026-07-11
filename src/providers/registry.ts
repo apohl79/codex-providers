@@ -1,8 +1,10 @@
 import { ProviderId } from "../auth/types";
+import { DeepSeekConfig } from "../config";
 import { resolveModel } from "../upstream/translator";
 import { buildAnthropicProvider } from "./anthropic";
 import { buildCodexProvider } from "./codex";
 import { buildCursorProvider } from "./cursor";
+import { buildDeepSeekProvider } from "./deepseek";
 import { Provider } from "./types";
 
 export interface ProviderRegistry {
@@ -14,12 +16,21 @@ export interface ProviderRegistry {
   withAccounts(): Provider[];
 }
 
-export function buildRegistry(authDir: string): ProviderRegistry {
+export function buildRegistry(
+  authDir: string,
+  deepseekConfig?: DeepSeekConfig,
+): ProviderRegistry {
   const anthropic = buildAnthropicProvider(authDir);
   const codex = buildCodexProvider(authDir);
   const cursor = buildCursorProvider(authDir);
-  const byId: Record<ProviderId, Provider> = { anthropic, codex, cursor };
-  const ordered: Provider[] = [anthropic, codex, cursor];
+  const deepseek = buildDeepSeekProvider(authDir, deepseekConfig);
+  const byId: Record<ProviderId, Provider> = {
+    anthropic,
+    codex,
+    cursor,
+    deepseek,
+  };
+  const ordered: Provider[] = [anthropic, codex, cursor, deepseek];
 
   return {
     get: (id) => {
@@ -40,11 +51,13 @@ export function buildRegistry(authDir: string): ProviderRegistry {
       const cursorOnly =
         cursor.manager.accountCount > 0 &&
         anthropic.manager.accountCount === 0 &&
-        codex.manager.accountCount === 0;
+        codex.manager.accountCount === 0 &&
+        deepseek.manager.accountCount === 0;
       if (cursorOnly) return cursor;
 
       // Multi-provider setups: fall back to the explicit family routes.
       if (codex.matchesModel(resolved)) return codex;
+      if (deepseek.matchesModel(resolved)) return deepseek;
       if (anthropic.matchesModel(resolved)) return anthropic;
       // Unknown model + multi-provider: keep historical behaviour and
       // dispatch to anthropic so the client gets a clear "no account" error

@@ -88,7 +88,7 @@ async function startApp(
 async function startAppWithLoadedRegistry(
   config: Config,
 ): Promise<http.Server> {
-  const registry = buildRegistry(config["auth-dir"]);
+  const registry = buildRegistry(config["auth-dir"], config.deepseek);
   for (const provider of registry.all()) provider.manager.load();
   const app = createServer(config, registry);
   const server = createHttpServer(app);
@@ -338,6 +338,82 @@ test("proxies a non-stream chat completion through Claude OAuth token", async (t
   assert.equal(resp.body.object, "chat.completion");
   assert.equal(resp.body.choices[0].message.content, "hello from claude");
   assert.equal(resp.body.usage.total_tokens, 17);
+});
+
+test("proxies DeepSeek models through the Anthropic API-key endpoint", async (t) => {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-deepseek-"));
+  const previousApiKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  const restoreFetch = withMockedFetch(async (input, init) => {
+    assert.equal(
+      String(input),
+      "https://api.deepseek.com/anthropic/v1/messages",
+    );
+    assert.equal(init?.method, "POST");
+    const headers = init?.headers as Record<string, string>;
+    assert.equal(headers["x-api-key"], "deepseek-test-key");
+    assert.equal(headers.Authorization, undefined);
+    assert.equal(headers["anthropic-beta"], undefined);
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.model, "deepseek-v4-pro");
+    assert.deepEqual(body.thinking, { type: "enabled", budget_tokens: 1024 });
+
+    return new Response(
+      JSON.stringify({
+        id: "msg_deepseek_test",
+        type: "message",
+        role: "assistant",
+        model: "deepseek-v4-pro",
+        content: [{ type: "text", text: "hello from deepseek" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 4, output_tokens: 6 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  const server = await startAppWithLoadedRegistry(makeConfig(authDir));
+
+  t.after(async () => {
+    restoreFetch();
+    if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = previousApiKey;
+    await stopApp(server);
+    fs.rmSync(authDir, { recursive: true, force: true });
+  });
+
+  const modelsResp = await requestJson({
+    server,
+    method: "GET",
+    path: "/v1/models",
+    headers: { Authorization: "Bearer test-key" },
+  });
+  assert.equal(modelsResp.status, 200);
+  assert.ok(
+    modelsResp.body.data.some(
+      (model: { id: string }) => model.id === "deepseek-v4-pro",
+    ),
+  );
+
+  const resp = await requestJson({
+    server,
+    method: "POST",
+    path: "/v1/chat/completions",
+    headers: { Authorization: "Bearer test-key" },
+    body: {
+      model: "deepseek-v4-pro",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "low",
+      stream: false,
+    },
+  });
+
+  assert.equal(resp.status, 200);
+  assert.equal(resp.body.choices[0].message.content, "hello from deepseek");
+  assert.equal(resp.body.usage.total_tokens, 10);
+  assert.equal(
+    fs.readdirSync(authDir).some((name) => name.startsWith("deepseek-")),
+    false,
+  );
 });
 
 test("refreshes the OAuth token after an upstream 401 and retries successfully", async (t) => {

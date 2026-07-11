@@ -20,7 +20,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function isProvider(value: unknown): boolean {
-  return value === "anthropic" || value === "codex" || value === "cursor";
+  return (
+    value === "anthropic" ||
+    value === "codex" ||
+    value === "cursor" ||
+    value === "deepseek"
+  );
 }
 
 function isNullableString(value: unknown): boolean {

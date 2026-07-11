@@ -28,10 +28,15 @@ function parseProviderArg(args: string[]): ProviderId {
   const flag = args.find((a) => a.startsWith("--provider="));
   if (!flag) return "anthropic";
   const value = flag.split("=", 2)[1];
-  if (value === "anthropic" || value === "codex" || value === "cursor")
+  if (
+    value === "anthropic" ||
+    value === "codex" ||
+    value === "cursor" ||
+    value === "deepseek"
+  )
     return value;
   throw new Error(
-    `Unknown provider "${value}". Supported: anthropic, codex, cursor`,
+    `Unknown provider "${value}". Supported: anthropic, codex, cursor, deepseek`,
   );
 }
 
@@ -85,6 +90,13 @@ async function doLogin(
   manual: boolean,
 ): Promise<void> {
   const provider = registry.get(providerId);
+
+  if (!provider.oauth || !provider.buildAuthUrl || !provider.exchangeCode) {
+    const apiKeyEnv = config.deepseek?.["api-key-env"] || "DEEPSEEK_API_KEY";
+    throw new Error(
+      `Provider "${providerId}" uses API-key authentication; set ${apiKeyEnv} instead of using --login`,
+    );
+  }
 
   const pkce = generatePKCECodes();
   const state = crypto.randomBytes(16).toString("hex");
@@ -149,7 +161,7 @@ async function startServer(): Promise<void> {
   const config = loadConfig(configPath);
   const authDir = resolveAuthDir(config["auth-dir"]);
 
-  const registry = buildRegistry(authDir);
+  const registry = buildRegistry(authDir, config.deepseek);
   for (const p of registry.all()) p.manager.load();
 
   const totalAccounts = registry
@@ -219,7 +231,7 @@ async function main(): Promise<void> {
     const cursorStorage = args
       .find((a) => a.startsWith("--cursor-storage="))
       ?.split("=", 2)[1];
-    const registry = buildRegistry(authDir);
+    const registry = buildRegistry(authDir, config.deepseek);
     for (const p of registry.all()) p.manager.load();
     if (providerId === "cursor") {
       if (cursorStorage || args.includes("--cursor-import-local")) {

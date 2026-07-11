@@ -2,7 +2,7 @@
 
 [中文](./README_CN.md)
 
-A lightweight OAuth-to-API proxy that turns your Claude (Anthropic), ChatGPT (OpenAI Codex), and experimental local Cursor login into usable API endpoints for Claude Code and OpenAI-compatible clients.
+A lightweight OAuth-to-API proxy that turns your Claude (Anthropic), ChatGPT (OpenAI Codex), DeepSeek API key, and experimental local Cursor login into usable API endpoints for Claude Code and OpenAI-compatible clients.
 
 auth2api is intentionally small and focused:
 
@@ -15,7 +15,7 @@ It is not trying to be a large multi-provider gateway. If you want a compact, un
 ## Features
 
 - **Lightweight by design** — small codebase, minimal moving parts
-- **Multiple providers, one proxy** — Claude OAuth, OpenAI Codex (ChatGPT) OAuth, and an experimental Cursor local-login provider coexist; per-provider account pools, cooldown, refresh, and stats
+- **Multiple providers, one proxy** — Claude OAuth, OpenAI Codex (ChatGPT) OAuth, DeepSeek API-key authentication, and an experimental Cursor local-login provider coexist; per-provider account pools, cooldown, refresh, and stats
 - **Multi-account support** — load multiple OAuth tokens per provider with sticky routing, automatic failover, and per-account usage tracking
 - **OpenAI-compatible API** — supports `/v1/chat/completions`, `/v1/responses`, and `/v1/models`
 - **Claude native passthrough** — supports `/v1/messages` and `/v1/messages/count_tokens`
@@ -78,6 +78,7 @@ auth2api supports these upstream providers:
 
 - `anthropic` — Claude OAuth (default). Used for `claude-*` models.
 - `codex` — OpenAI's "Sign in with ChatGPT" OAuth, talking to the official codex backend at `https://chatgpt.com/backend-api/codex/responses`. Used for `gpt-5*` (incl. `gpt-5-codex`), `o\d*`, and `codex-*` models. Requires a **ChatGPT Plus or Pro** subscription — Free accounts authenticate but the first call fails with `model not supported`.
+- `deepseek` — DeepSeek's Anthropic-compatible Messages API, authenticated with an API key from the configured environment variable. Used for `deepseek-v4-pro` and `deepseek-v4-flash`.
 - `cursor` — experimental Cursor account, authorized either through a browser deep-link PKCE flow (default) or by importing the local Cursor desktop login. **Routing**: in multi-provider setups Cursor only serves models with an explicit `cursor-*` or `cr/*` prefix. In **Cursor-exclusive mode** (only Cursor is logged in, no `anthropic`/`codex` accounts), every request — including bare `claude-*` or `gpt-*` model names — is auto-routed through Cursor so off-the-shelf Claude Code / OpenAI clients work without a prefix.
 
 Pick the provider with `--provider=`. Default is `anthropic`.
@@ -90,6 +91,9 @@ node dist/index.js --login
 
 # Codex (ChatGPT Plus/Pro)
 node dist/index.js --login --provider=codex
+
+# DeepSeek uses an API key; do not run --login for it.
+export DEEPSEEK_API_KEY="<your-deepseek-api-key>"
 
 # Cursor (experimental; opens a browser to authorize your Cursor account)
 node dist/index.js --login --provider=cursor
@@ -150,6 +154,10 @@ host: "" # bind address, empty = 127.0.0.1
 port: 8317
 
 auth-dir: "~/.auth2api" # where OAuth tokens are stored
+
+deepseek:
+  api-key-env: "DEEPSEEK_API_KEY" # environment variable containing the key
+  base-url: "https://api.deepseek.com/anthropic"
 
 api-keys:
   - "your-api-key-here" # clients use this to authenticate
@@ -220,6 +228,8 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 | `gpt-5.4-mini`                                       | codex     | GPT-5.4 Mini                                       |
 | `gpt-5.3-codex`                                      | codex     | GPT-5.3 (Codex variant)                            |
 | `gpt-5.2`                                            | codex     | GPT-5.2                                            |
+| `deepseek-v4-pro`                                    | deepseek  | DeepSeek V4 Pro                                    |
+| `deepseek-v4-flash`                                  | deepseek  | DeepSeek V4 Flash                                  |
 | `cursor-claude-opus-4-7-medium`                      | cursor    | Claude Opus 4.7 routed through Cursor              |
 | `cursor-claude-sonnet-4-7-medium`                    | cursor    | Claude Sonnet 4.7 routed through Cursor            |
 | `cursor-default`                                     | cursor    | Cursor "Auto" model                                |
@@ -235,7 +245,7 @@ Short convenience aliases accepted by auth2api:
 
 Claude Code's `[1m]` suffix is accepted on Claude aliases and API IDs (for example `opus[1m]` or `claude-opus-4-8[1m]`). auth2api strips the suffix before calling Anthropic; current 1M-capable Claude models use the 1M context window by default and do not need the retired `context-1m` beta header.
 
-Routing: requests are dispatched to the matching pool by model name. `claude-*` and the bare aliases (`fable`/`opus`/`opus-4.8`/`sonnet`/`haiku`) hit your Claude account; `gpt-5*`, `o\d` (`o3`, `o4-mini`, …), and `codex-*` hit your Codex account; `cursor-*` and `cr/*` hit your Cursor account. Other model families (`gpt-3.5-*`, `gpt-4*`, …) are not served by either backend and route to anthropic by default. If you haven't logged into the matching provider, the request returns `503 no_account_for_provider` with the exact `--login` command to fix it.
+Routing: requests are dispatched to the matching pool by model name. `claude-*` and the bare aliases (`fable`/`opus`/`opus-4.8`/`sonnet`/`haiku`) hit your Claude account; `gpt-5*`, `o\d` (`o3`, `o4-mini`, …), and `codex-*` hit your Codex account; `deepseek-v4-*` hits DeepSeek; `cursor-*` and `cr/*` hit your Cursor account. Other model families (`gpt-3.5-*`, `gpt-4*`, …) are not served by either backend and route to anthropic by default. If you haven't configured the matching provider, the request returns `503 no_account_for_provider` with the setup needed to fix it.
 
 #### "Cursor exclusive" mode (zero-config Claude Code / OpenAI clients)
 
