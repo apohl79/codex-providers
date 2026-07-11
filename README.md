@@ -359,6 +359,7 @@ codex -p deepseek
 
 The wizard:
 
+- starts with `Add new provider`, `Manage providers`, and `Abort`; already configured providers are disabled in the add flow
 - checks for the selected provider credential in `auth-dir` and starts the built-in login flow if one is missing
 - ensures `config.yaml` has a local proxy API key
 - reads the server endpoint from `config.yaml` instead of asking for an endpoint manually

@@ -248,5 +248,38 @@ class DeepSeekBackendTest(unittest.TestCase):
             self.assertIn("[model_providers.deepseek]", provider)
 
 
+class ProviderMenuTest(unittest.TestCase):
+    class FakeUi:
+        def __init__(self, selections: list[int]) -> None:
+            self.selections = iter(selections)
+            self.calls: list[tuple[str, list[codex_manager.MenuItem]]] = []
+
+        def menu(self, title: str, subtitle: str, items: list[codex_manager.MenuItem], default: int = 0) -> int:
+            self.calls.append((title, items))
+            return next(self.selections)
+
+    def test_add_menu_disables_configured_provider(self) -> None:
+        ui = self.FakeUi([0, 1])
+
+        selection = codex_manager.choose_provider_action(ui, {"claude"})
+
+        self.assertEqual(selection, ("add", "deepseek"))
+        add_items = ui.calls[1][1]
+        self.assertEqual(add_items[0][2], False)
+        self.assertEqual(add_items[1][2], True)
+
+    def test_add_menu_is_disabled_when_both_providers_are_configured(self) -> None:
+        ui = self.FakeUi([1, 0])
+
+        selection = codex_manager.choose_provider_action(ui, {"claude", "deepseek"})
+
+        self.assertEqual(selection, ("manage", "claude"))
+        manager_items = ui.calls[1][1]
+        self.assertEqual([item[0] for item in manager_items], ["Claude", "DeepSeek", "Abort"])
+        top_items = ui.calls[0][1]
+        self.assertEqual(top_items[0][2], False)
+        self.assertEqual(top_items[1][2], True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Union
 
 
 @dataclass(frozen=True)
@@ -90,6 +90,9 @@ class Draft:
 class AgentDefinition:
     path: Path
     content: str
+
+
+MenuItem = Union[tuple[str, str], tuple[str, str, bool]]
 
 
 CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
@@ -296,6 +299,49 @@ def has_claude_login(auth_dir: Path) -> bool:
 
 def has_deepseek_login(auth_dir: Path, api_key_env: str) -> bool:
     return any(auth_dir.glob("deepseek-*.json")) or bool(os.environ.get(api_key_env, "").strip())
+
+
+def provider_has_configuration(
+    backend: Backend,
+    auth_dir: Path,
+    api_key_env: str,
+    codex_home: Path,
+    codex_config: Path,
+) -> bool:
+    if backend.key == "deepseek":
+        has_credential = has_deepseek_login(auth_dir, api_key_env)
+    else:
+        has_credential = has_claude_login(auth_dir)
+    if has_credential:
+        return True
+
+    if any(
+        context.provider_id in backend.provider_aliases
+        or context.name in backend.context_aliases
+        for context in discover_contexts(codex_home)
+    ):
+        return True
+    return backend.default_provider in parse_providers(codex_config)
+
+
+def configured_backends(
+    auth_config: Auth2ApiConfig,
+    codex_home: Path,
+    codex_config: Path,
+    repo_dir: Path,
+) -> set[str]:
+    auth_dir = resolve_auth_dir(auth_config.auth_dir, repo_dir)
+    return {
+        backend.key
+        for backend in BACKENDS.values()
+        if provider_has_configuration(
+            backend,
+            auth_dir,
+            auth_config.deepseek_api_key_env,
+            codex_home,
+            codex_config,
+        )
+    }
 
 
 def insert_api_key(content: str, api_key: str) -> str:
@@ -1123,26 +1169,38 @@ class CursesUi:
             self.stdscr.nodelay(False)
         return tuple(sequence)
 
-    def menu(self, title: str, subtitle: str, items: list[tuple[str, str]], default: int = 0) -> int:
-        selected = default
+    def menu(self, title: str, subtitle: str, items: list[MenuItem], default: int = 0) -> int:
+        def enabled(index: int) -> bool:
+            item = items[index]
+            return len(item) < 3 or item[2]
+
+        selectable = [index for index in range(len(items)) if enabled(index)]
+        if not selectable:
+            raise ValueError("menu has no selectable items")
+        selected = default if default in selectable else selectable[0]
         while True:
             self.frame(title, subtitle)
             y = 4
             for index, (label, description) in enumerate(items):
-                attr = self.color(2) | curses.A_BOLD if index == selected else curses.A_NORMAL
+                if not enabled(index):
+                    attr = curses.A_DIM
+                else:
+                    attr = self.color(2) | curses.A_BOLD if index == selected else curses.A_NORMAL
                 self.add(y, 5, f"{index + 1}. {label}", attr)
                 self.add(y + 1, 8, description)
                 y += 3
             key = self.read_key()
             if key in (curses.KEY_UP, ord("k")):
-                selected = (selected - 1) % len(items)
+                position = selectable.index(selected)
+                selected = selectable[(position - 1) % len(selectable)]
             elif key in (curses.KEY_DOWN, ord("j")):
-                selected = (selected + 1) % len(items)
+                position = selectable.index(selected)
+                selected = selectable[(position + 1) % len(selectable)]
             elif key in (10, 13):
                 return selected
             elif ord("1") <= key <= ord("9"):
                 number = key - ord("1")
-                if number < len(items):
+                if number < len(items) and enabled(number):
                     return number
             elif key in (ord("q"), 27):
                 raise KeyboardInterrupt
@@ -1220,6 +1278,54 @@ def choose_missing_login_action(auth_dir: Path, backend: Backend = BACKENDS["cla
         )
 
     return curses.wrapper(run)
+
+
+def choose_provider_action(ui: CursesUi, configured: set[str]) -> tuple[str, str] | None:
+    can_add = len(configured) < len(BACKENDS)
+    can_manage = bool(configured)
+    action = ui.menu(
+        "Provider Manager",
+        "Add a provider or manage an existing Codex profile.",
+        [
+            (
+                "Add new provider",
+                "Choose Claude or DeepSeek, then sign in and configure models.",
+                can_add,
+            ),
+            (
+                "Manage providers",
+                "Choose an existing provider and update its models, context, and catalog.",
+                can_manage,
+            ),
+            ("Abort", "Exit without changing Codex config."),
+        ],
+        0,
+    )
+    if action == 2:
+        return None
+
+    if action == 0:
+        provider_action = "add"
+        candidates = list(BACKENDS.values())
+        subtitle = "Configured providers are disabled. Select a provider to add."
+    else:
+        provider_action = "manage"
+        candidates = [backend for backend in BACKENDS.values() if backend.key in configured]
+        subtitle = "Select a configured provider to manage."
+
+    items: list[MenuItem] = [
+        (
+            backend.label,
+            f"provider={backend.default_provider}; context={backend.default_context}",
+            backend.key not in configured if provider_action == "add" else True,
+        )
+        for backend in candidates
+    ]
+    items.append(("Abort", "Return without changing Codex config."))
+    selected = ui.menu("Select Provider", subtitle, items, 0)
+    if selected == len(items) - 1:
+        return None
+    return provider_action, candidates[selected].key
 
 
 def ensure_backend_login(
@@ -1578,6 +1684,10 @@ def parse_args() -> argparse.Namespace:
         help="Write Codex config even if the selected provider credential is absent.",
     )
     args = parser.parse_args()
+    args.preset_explicit = bool(
+        os.environ.get("CODEX_PROVIDER_PRESET")
+        or any(argument == "--preset" or argument.startswith("--preset=") for argument in sys.argv[1:])
+    )
     args.preset = args.preset.lower()
     if args.context or args.provider:
         parser.error("--context and --provider are no longer supported.")
@@ -1599,19 +1709,36 @@ def main() -> int:
     codex_home = Path(args.codex_home).expanduser()
     codex_config = Path(args.codex_config).expanduser() if args.codex_config else codex_home / "config.toml"
     auth2api_config = Path(args.auth2api_config).expanduser() if args.auth2api_config else repo_dir / "config.yaml"
-    if not args.source_context:
+    source_context_explicit = bool(args.source_context)
+    if not args.source_context and (args.preset_explicit or args.yes or not (sys.stdin.isatty() and sys.stdout.isatty())):
         args.source_context = str(codex_home / f"{BACKENDS[args.preset].default_context}.config.toml")
 
     interactive_tty = sys.stdin.isatty() and sys.stdout.isatty()
     auth_config = read_auth2api_config(auth2api_config)
+    selected_provider = args.preset
     try:
+        if interactive_tty and not args.preset_explicit and not args.yes:
+            configured = configured_backends(auth_config, codex_home, codex_config, repo_dir)
+
+            def choose_provider(stdscr: curses.window) -> tuple[str, str] | None:
+                return choose_provider_action(CursesUi(stdscr), configured)
+
+            selection = curses.wrapper(choose_provider)
+            if selection is None:
+                print("Aborted.")
+                return 0
+            _, selected_provider = selection
+            args.preset = selected_provider
+            if not source_context_explicit:
+                args.source_context = str(codex_home / f"{BACKENDS[selected_provider].default_context}.config.toml")
+
         ensure_backend_login(
             args,
             repo_dir,
             auth2api_config,
             auth_config,
             interactive_tty,
-            BACKENDS[args.preset],
+            BACKENDS[selected_provider],
         )
     except KeyboardInterrupt:
         print("Aborted.")
