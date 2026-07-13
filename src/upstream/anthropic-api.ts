@@ -193,6 +193,36 @@ export interface CallMessagesOptions {
   signal?: AbortSignal;
 }
 
+function normalizeDeepSeekToolResultMessages(body: any): any {
+  if (!Array.isArray(body?.messages)) return body;
+
+  const messages: any[] = [];
+  for (const message of body.messages) {
+    const content = message?.content;
+    const isToolResultMessage =
+      message?.role === "user" &&
+      Array.isArray(content) &&
+      content.length > 0 &&
+      content.every((block: any) => block?.type === "tool_result");
+    const previous = messages[messages.length - 1];
+    const previousIsToolResultMessage =
+      previous?.role === "user" &&
+      Array.isArray(previous.content) &&
+      previous.content.length > 0 &&
+      previous.content.every((block: any) => block?.type === "tool_result");
+
+    if (isToolResultMessage && previousIsToolResultMessage) {
+      previous.content.push(...content);
+    } else {
+      messages.push(
+        isToolResultMessage ? { ...message, content: [...content] } : message,
+      );
+    }
+  }
+
+  return { ...body, messages };
+}
+
 export async function callAnthropicMessages(
   options: CallMessagesOptions,
 ): Promise<Response> {
@@ -243,6 +273,7 @@ export async function callAnthropicMessagesWithApiKey(
 ): Promise<Response> {
   const { request, account, config, baseUrl } = options;
   const body = options.body ?? request.body;
+  const upstreamBody = normalizeDeepSeekToolResultMessages(body);
   const stream = !!body.stream;
   const timeoutMs = stream
     ? config.timeouts["stream-messages-ms"]
@@ -257,7 +288,7 @@ export async function callAnthropicMessagesWithApiKey(
       "anthropic-version": "2023-06-01",
       "x-api-key": account.token.accessToken,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(upstreamBody),
     signal: withTimeoutSignal(timeoutMs, options.signal),
   });
 

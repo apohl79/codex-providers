@@ -649,6 +649,40 @@ test("openaiToAnthropic translates tool role messages", () => {
   assert.equal(result.messages[2].content[0].tool_use_id, "call_1");
 });
 
+test("openaiToAnthropic groups parallel tool results immediately after tool calls", () => {
+  const result = openaiToAnthropic({
+    model: "deepseek-v4-pro",
+    messages: [
+      { role: "user", content: "Use both tools." },
+      {
+        role: "assistant",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "one", arguments: "{}" },
+          },
+          {
+            id: "call_2",
+            type: "function",
+            function: { name: "two", arguments: "{}" },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "one" },
+      { role: "tool", tool_call_id: "call_2", content: "two" },
+    ],
+  });
+
+  assert.deepEqual(result.messages[2], {
+    role: "user",
+    content: [
+      { type: "tool_result", tool_use_id: "call_1", content: "one" },
+      { type: "tool_result", tool_use_id: "call_2", content: "two" },
+    ],
+  });
+});
+
 // ══════════════════════════════════════════════════
 // translator.ts — Anthropic → OpenAI Chat
 // ══════════════════════════════════════════════════
@@ -963,6 +997,43 @@ test("responsesToAnthropic replays reasoning before a DeepSeek tool call", () =>
       ],
     },
   ]);
+});
+
+test("responsesToAnthropic groups parallel tool results immediately after tool calls", () => {
+  const result = responsesToAnthropic({
+    model: "deepseek-v4-pro",
+    reasoning: { effort: "high" },
+    input: [
+      { role: "user", content: "Use both tools." },
+      {
+        type: "reasoning",
+        summary: [{ type: "summary_text", text: "I need both tools." }],
+      },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "one",
+        arguments: "{}",
+      },
+      {
+        type: "function_call",
+        call_id: "call_2",
+        name: "two",
+        arguments: "{}",
+      },
+      { type: "function_call_output", call_id: "call_1", output: "one" },
+      { type: "function_call_output", call_id: "call_2", output: "two" },
+    ],
+  });
+
+  const toolResults = result.messages[result.messages.length - 1];
+  assert.deepEqual(toolResults, {
+    role: "user",
+    content: [
+      { type: "tool_result", tool_use_id: "call_1", content: "one" },
+      { type: "tool_result", tool_use_id: "call_2", content: "two" },
+    ],
+  });
 });
 
 test("anthropicToResponses preserves thinking signatures for replay", () => {

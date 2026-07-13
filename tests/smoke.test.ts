@@ -344,6 +344,7 @@ test("proxies DeepSeek models through the Anthropic API-key endpoint", async (t)
   const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-deepseek-"));
   const previousApiKey = process.env.DEEPSEEK_API_KEY;
   process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  let sawGroupedNativeToolResults = false;
   const restoreFetch = withMockedFetch(async (input, init) => {
     assert.equal(
       String(input),
@@ -356,7 +357,26 @@ test("proxies DeepSeek models through the Anthropic API-key endpoint", async (t)
     assert.equal(headers["anthropic-beta"], undefined);
     const body = JSON.parse(String(init?.body));
     assert.equal(body.model, "deepseek-v4-pro");
-    assert.deepEqual(body.thinking, { type: "enabled", budget_tokens: 1024 });
+    if (
+      body.messages?.some(
+        (message: any) =>
+          Array.isArray(message.content) &&
+          message.content.some((block: any) => block.type === "tool_result"),
+      )
+    ) {
+      sawGroupedNativeToolResults = true;
+      assert.equal(body.messages.length, 3);
+      assert.equal(body.messages[2].content.length, 2);
+      assert.deepEqual(
+        body.messages[2].content.map((block: any) => block.tool_use_id),
+        ["call_1", "call_2"],
+      );
+    } else {
+      assert.deepEqual(body.thinking, {
+        type: "enabled",
+        budget_tokens: 1024,
+      });
+    }
 
     return new Response(
       JSON.stringify({
@@ -410,6 +430,42 @@ test("proxies DeepSeek models through the Anthropic API-key endpoint", async (t)
   assert.equal(resp.status, 200);
   assert.equal(resp.body.choices[0].message.content, "hello from deepseek");
   assert.equal(resp.body.usage.total_tokens, 10);
+
+  const nativeResp = await requestJson({
+    server,
+    method: "POST",
+    path: "/v1/messages",
+    headers: { Authorization: "Bearer test-key" },
+    body: {
+      model: "deepseek-v4-pro",
+      max_tokens: 256,
+      messages: [
+        { role: "user", content: "Use both tools." },
+        {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "call_1", name: "one", input: {} },
+            { type: "tool_use", id: "call_2", name: "two", input: {} },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "call_1", content: "one" },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "call_2", content: "two" },
+          ],
+        },
+      ],
+    },
+  });
+
+  assert.equal(nativeResp.status, 200);
+  assert.equal(sawGroupedNativeToolResults, true);
   assert.equal(
     fs.readdirSync(authDir).some((name) => name.startsWith("deepseek-")),
     false,

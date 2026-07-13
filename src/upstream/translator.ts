@@ -251,6 +251,20 @@ function appendAssistantContent(messages: any[], content: any[]): void {
   messages.push({ role: "assistant", content });
 }
 
+function appendToolResultContent(messages: any[], content: any): void {
+  const previous = messages[messages.length - 1];
+  if (
+    previous?.role === "user" &&
+    Array.isArray(previous.content) &&
+    previous.content.length > 0 &&
+    previous.content.every((block: any) => block?.type === "tool_result")
+  ) {
+    previous.content.push(content);
+    return;
+  }
+  messages.push({ role: "user", content: [content] });
+}
+
 // ── OpenAI chat completion request → Anthropic messages request ──
 
 export function openaiToAnthropic(body: any): any {
@@ -304,18 +318,13 @@ export function openaiToAnthropic(body: any): any {
           : msg.content?.map((c: any) => c.text).join("\n");
       systemParts.push({ type: "text", text });
     } else if (msg.role === "tool") {
-      messages.push({
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: msg.tool_call_id,
-            content:
-              typeof msg.content === "string"
-                ? msg.content
-                : JSON.stringify(msg.content),
-          },
-        ],
+      appendToolResultContent(messages, {
+        type: "tool_result",
+        tool_use_id: msg.tool_call_id,
+        content:
+          typeof msg.content === "string"
+            ? msg.content
+            : JSON.stringify(msg.content),
       });
     } else if (msg.role === "assistant" && msg.tool_calls) {
       const content: any[] = [];
@@ -924,18 +933,13 @@ export function responsesToAnthropic(body: any): any {
       item.type === "function_call_output" ||
       item.type === "custom_tool_call_output"
     ) {
-      messages.push({
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: item.call_id,
-            content:
-              typeof item.output === "string"
-                ? item.output
-                : JSON.stringify(item.output),
-          },
-        ],
+      appendToolResultContent(messages, {
+        type: "tool_result",
+        tool_use_id: item.call_id,
+        content:
+          typeof item.output === "string"
+            ? item.output
+            : JSON.stringify(item.output),
       });
     }
 
