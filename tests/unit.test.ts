@@ -519,6 +519,43 @@ test("openaiToAnthropic translates reasoning_effort to thinking", () => {
   assert.equal(result.thinking.budget_tokens, 24576);
 });
 
+test("openaiToAnthropic replays DeepSeek reasoning_content with tool calls", () => {
+  const result = openaiToAnthropic({
+    model: "deepseek-v4-pro",
+    messages: [
+      { role: "user", content: "What is the weather?" },
+      {
+        role: "assistant",
+        content: null,
+        reasoning_content: "I need to call weather.",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "get_weather",
+              arguments: '{"city":"Berlin"}',
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(result.messages[1], {
+    role: "assistant",
+    content: [
+      { type: "thinking", thinking: "I need to call weather." },
+      {
+        type: "tool_use",
+        id: "call_1",
+        name: "get_weather",
+        input: { city: "Berlin" },
+      },
+    ],
+  });
+});
+
 test("openaiToAnthropic translates tools", () => {
   const result = openaiToAnthropic({
     model: "sonnet",
@@ -632,6 +669,23 @@ test("anthropicToOpenai translates basic response", () => {
   assert.equal(result.usage.prompt_tokens, 10);
   assert.equal(result.usage.completion_tokens, 5);
   assert.equal(result.usage.total_tokens, 15);
+});
+
+test("anthropicToOpenai exposes DeepSeek reasoning_content for replay", () => {
+  const result = anthropicToOpenai(
+    {
+      content: [
+        { type: "thinking", thinking: "I need to call weather." },
+        { type: "text", text: "Checking." },
+      ],
+    },
+    "deepseek-v4-pro",
+  );
+
+  assert.equal(
+    result.choices[0].message.reasoning_content,
+    "I need to call weather.",
+  );
 });
 
 test("anthropicToOpenai maps stop reasons correctly", () => {
@@ -856,6 +910,85 @@ test("responsesToAnthropic translates reasoning with summary", () => {
   assert.equal(result.thinking.type, "enabled");
   assert.equal(result.thinking.budget_tokens, 24576);
   assert.equal(result.thinking.display, "summarized");
+});
+
+test("responsesToAnthropic replays reasoning before a DeepSeek tool call", () => {
+  const result = responsesToAnthropic({
+    model: "deepseek-v4-pro",
+    reasoning: { effort: "high" },
+    input: [
+      { role: "user", content: "What is the weather?" },
+      {
+        type: "reasoning",
+        id: "rs_1",
+        summary: [{ type: "summary_text", text: "I need to call weather." }],
+        signature: "sig_1",
+      },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "get_weather",
+        arguments: '{"city":"Berlin"}',
+      },
+      {
+        type: "function_call_output",
+        call_id: "call_1",
+        output: "sunny",
+      },
+    ],
+  });
+
+  assert.deepEqual(result.messages, [
+    { role: "user", content: "What is the weather?" },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "thinking",
+          thinking: "I need to call weather.",
+          signature: "sig_1",
+        },
+        {
+          type: "tool_use",
+          id: "call_1",
+          name: "get_weather",
+          input: { city: "Berlin" },
+        },
+      ],
+    },
+    {
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "call_1", content: "sunny" },
+      ],
+    },
+  ]);
+});
+
+test("anthropicToResponses preserves thinking signatures for replay", () => {
+  const result = anthropicToResponses(
+    {
+      content: [
+        { type: "thinking", thinking: "Need a tool.", signature: "sig_2" },
+      ],
+      stop_reason: "end_turn",
+    },
+    "deepseek-v4-pro",
+  );
+
+  assert.deepEqual(result.output[0], {
+    type: "message",
+    id: result.output[0].id,
+    role: "assistant",
+    status: "completed",
+    content: [
+      {
+        type: "reasoning",
+        summary: [{ type: "summary_text", text: "Need a tool." }],
+        signature: "sig_2",
+      },
+    ],
+  });
 });
 
 test("responsesToAnthropic aliases opus-4.8 and filters unsupported tool kinds", () => {

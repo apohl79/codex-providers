@@ -51,6 +51,10 @@ const MODEL_ALIASES: Record<string, string> = {
   "claude-haiku-4-5": "claude-haiku-4-5-20251001",
 };
 
+function isDeepSeekModel(model: string): boolean {
+  return /^deepseek-v4-/i.test(model);
+}
+
 const LONG_CONTEXT_SUFFIX_RE = /\[1m\]$/i;
 
 export function resolveModel(model: string): string {
@@ -215,6 +219,38 @@ function customToolInputFromJson(argumentsJson: string): string {
   }
 }
 
+function responsesReasoningText(item: any): string {
+  if (!Array.isArray(item?.summary)) return "";
+  return item.summary
+    .filter((part: any) => part?.type === "summary_text")
+    .map((part: any) => part.text || "")
+    .join("");
+}
+
+function anthropicThinkingFromResponsesReasoning(item: any): any | null {
+  const thinking = responsesReasoningText(item);
+  if (!thinking) return null;
+
+  const block: any = { type: "thinking", thinking };
+  if (item.signature !== undefined) block.signature = item.signature;
+  return block;
+}
+
+function appendAssistantContent(messages: any[], content: any[]): void {
+  if (!content.length) return;
+  const previous = messages[messages.length - 1];
+  if (previous?.role === "assistant") {
+    if (typeof previous.content === "string") {
+      previous.content = [{ type: "text", text: previous.content }];
+    }
+    if (Array.isArray(previous.content)) {
+      previous.content.push(...content);
+      return;
+    }
+  }
+  messages.push({ role: "assistant", content });
+}
+
 // ── OpenAI chat completion request → Anthropic messages request ──
 
 export function openaiToAnthropic(body: any): any {
@@ -283,6 +319,9 @@ export function openaiToAnthropic(body: any): any {
       });
     } else if (msg.role === "assistant" && msg.tool_calls) {
       const content: any[] = [];
+      if (isDeepSeekModel(anthropicBody.model) && msg.reasoning_content) {
+        content.push({ type: "thinking", thinking: msg.reasoning_content });
+      }
       if (msg.content) {
         const text =
           typeof msg.content === "string"
@@ -346,6 +385,7 @@ function mapStopReason(reason: string): string {
 
 export function anthropicToOpenai(anthropicResp: any, model: string): any {
   let textContent = "";
+  let reasoningContent = "";
   const toolCalls: any[] = [];
 
   if (Array.isArray(anthropicResp.content)) {
@@ -353,7 +393,7 @@ export function anthropicToOpenai(anthropicResp: any, model: string): any {
       if (block.type === "text") {
         textContent += block.text;
       } else if (block.type === "thinking" && block.thinking) {
-        // thinking blocks not exposed in chat completions response
+        reasoningContent += block.thinking;
       } else if (block.type === "tool_use") {
         toolCalls.push({
           id: block.id,
@@ -368,6 +408,9 @@ export function anthropicToOpenai(anthropicResp: any, model: string): any {
   }
 
   const message: any = { role: "assistant", content: textContent || null };
+  if (isDeepSeekModel(model) && reasoningContent) {
+    message.reasoning_content = reasoningContent;
+  }
   if (toolCalls.length) message.tool_calls = toolCalls;
 
   const inputTokens = anthropicResp.usage?.input_tokens || 0;
@@ -723,6 +766,12 @@ function convertResponsesPart(part: any, role: string): any[] {
     case "text":
       return [{ type: "text", text: part.text || "" }];
 
+    case "reasoning": {
+      if (role !== "assistant") return [];
+      const thinking = anthropicThinkingFromResponsesReasoning(part);
+      return thinking ? [thinking] : [];
+    }
+
     case "image":
     case "input_image": {
       const url = part.image_url?.url || part.url || "";
@@ -829,6 +878,12 @@ export function responsesToAnthropic(body: any): any {
   for (const item of body.input || []) {
     const role = item.role;
 
+    if (item.type === "reasoning") {
+      const thinking = anthropicThinkingFromResponsesReasoning(item);
+      if (thinking) appendAssistantContent(messages, [thinking]);
+      continue;
+    }
+
     if (role === "system") {
       const text = extractText(item.content);
       if (text) {
@@ -845,7 +900,11 @@ export function responsesToAnthropic(body: any): any {
         const content = item.content.flatMap((part: any) =>
           convertResponsesPart(part, role),
         );
-        if (content.length) messages.push({ role, content });
+        if (role === "assistant") {
+          appendAssistantContent(messages, content);
+        } else if (content.length) {
+          messages.push({ role, content });
+        }
       }
     }
 
@@ -890,17 +949,14 @@ export function responsesToAnthropic(body: any): any {
       } catch {
         /* ignore */
       }
-      messages.push({
-        role: "assistant",
-        content: [
-          {
-            type: "tool_use",
-            id: item.call_id || item.id,
-            name: item.name,
-            input,
-          },
-        ],
-      });
+      appendAssistantContent(messages, [
+        {
+          type: "tool_use",
+          id: item.call_id || item.id,
+          name: item.name,
+          input,
+        },
+      ]);
     }
   }
 
@@ -940,10 +996,12 @@ export function anthropicToResponses(anthropicResp: any, model: string): any {
         annotations: [],
       });
     } else if (block.type === "thinking" && block.thinking) {
-      contentParts.push({
+      const reasoning: any = {
         type: "reasoning",
         summary: [{ type: "summary_text", text: block.thinking }],
-      });
+      };
+      if (block.signature !== undefined) reasoning.signature = block.signature;
+      contentParts.push(reasoning);
     } else if (block.type === "tool_use") {
       if (block.name === "apply_patch") {
         toolCalls.push({
