@@ -12,8 +12,29 @@ auth2api is intentionally small and focused:
 
 It is not trying to be a large multi-provider gateway. If you want a compact, understandable proxy that is easy to run and modify, auth2api is built for that use case.
 
+> **This fork fixes the upstream translation layer and adds zero-config Codex integration.** The upstream auth2api's OpenAI→Anthropic translator was broken for Codex — Claude models failed on tool calls, DeepSeek failed entirely. This fork repaired the translation layer so both work, then added `codex-manager` to make setup a single command. Every generated profile includes model-specific system prompts tuned for the [apohl79 Codex fork](https://github.com/apohl79/codex).
+
+```bash
+git clone https://github.com/apohl79/auth2api
+cd auth2api && git checkout main-fork
+npm install && npm run build
+
+# Zero-config: starts provider login and writes all Codex files
+./codex-manager
+codex -p claude
+
+# DeepSeek (requires DEEPSEEK_API_KEY)
+./codex-manager --preset deepseek --yes
+codex -p deepseek
+```
+
 ## Features
 
+- **Codex integration** — `codex-manager` curses wizard writes all Codex config files (`~/.codex/*.config.toml`, model catalogs, agent definitions) for Claude, DeepSeek, and GPT backends. Starts provider login flows automatically. Non-interactive mode available (`--yes`).
+- **Fixed translation layer** — the upstream OpenAI→Anthropic translator didn't handle Codex's wire format correctly: Claude models broke on tool calls and structured output, DeepSeek's Anthropic-compatible endpoint was untested. Both are now working, including streaming, reasoning, tool use, and image passthrough (for providers that support it).
+- **Per-backend system prompts** — `docs/prompts/{gpt,claude,deepseek}.md` load as `base_instructions` in generated model catalogs and agent TOML files. Edit the markdown directly to customize behavior per backend. `--update-models-cache` syncs `gpt.md` into `~/.codex/models_cache.json`.
+- **Codex-optimized prompts** — each prompt is tuned for the apohl79 Codex fork: GPT gets the full collaborative thought-partner style with CommonMark and visualization guidance. Claude gets outcome-first terseness, zero-comment policy, no compat hacks, OWASP security awareness. DeepSeek gets the GPT baseline plus explicit vision-unsupported notice.
+- **Claude & DeepSeek fixes** — current Claude model defaults (`claude-opus-4-8`, `claude-fable-5`, `claude-sonnet-5`, `claude-haiku-4-5`). DeepSeek profiles with correct model config (text-only — DeepSeek's Anthropic API rejects `type: "image"`). Claude Code `[1m]` suffix handling. Responses custom-tool compatibility for freeform tools such as `apply_patch`.
 - **Lightweight by design** — small codebase, minimal moving parts
 - **Multiple providers, one proxy** — Claude OAuth, OpenAI Codex (ChatGPT) OAuth, DeepSeek API-key authentication, and an experimental Cursor local-login provider coexist; per-provider account pools, cooldown, refresh, and stats
 - **Multi-account support** — load multiple OAuth tokens per provider with sticky routing, automatic failover, and per-account usage tracking
@@ -38,40 +59,6 @@ cd auth2api
 npm install
 npm run build
 ```
-
-### Fork branch
-
-The `apohl79/main-fork` branch adds a Codex profile wizard, current Claude model defaults, Claude Code `[1m]` model suffix handling, and Responses custom-tool compatibility for freeform tools such as `apply_patch`.
-
-```bash
-git clone https://github.com/apohl79/auth2api
-cd auth2api
-git checkout main-fork
-npm install
-npm run build
-```
-
-### Recommended local macOS + Codex setup
-
-For a local Codex setup backed by your Claude OAuth account:
-
-```bash
-# 1. Create or update the Codex Claude profile.
-#    If no Claude login exists yet, the wizard starts the login flow.
-./codex-manager
-
-# 2. Install the auth2api runner.
-./install.sh
-
-# 3. Start the local server if it is not already running.
-auth2api ensure
-
-# 4. Start Codex with the generated profile.
-codex -p claude
-```
-
-`codex-manager` reads this repo's `config.yaml`, starts the Claude login flow when needed, points Codex at the local service, and writes the profile files under `~/.codex`.
-
 ## Login
 
 auth2api supports these upstream providers:
@@ -346,35 +333,12 @@ Claude Code uses the native `/v1/messages` endpoint which auth2api passes throug
 
 ## Use with Codex
 
-The fork includes `codex-manager`, a curses-based wizard that configures Codex to use this local auth2api server as a Claude or DeepSeek provider.
+See [Fork Features](#fork-features-apohl79main-fork) above for quick start, non-interactive usage, and the `--update-models-cache` flag. `codex-manager` writes the following files:
 
-```bash
-./codex-manager
-codex -p claude
-
-# DeepSeek profile (starts DeepSeek login if no key is stored or available via DEEPSEEK_API_KEY)
-./codex-manager --preset deepseek --yes
-codex -p deepseek
-```
-
-The wizard:
-
-- starts with `Add new provider`, `Manage providers`, and `Abort`; already configured providers are disabled in the add flow
-- checks for the selected provider credential in `auth-dir` and starts the built-in login flow if one is missing
-- ensures `config.yaml` has a local proxy API key
-- reads the server endpoint from `config.yaml` instead of asking for an endpoint manually
-- writes or updates `~/.codex/config.toml`
-- writes `~/.codex/claude.config.toml`
-- writes `~/.codex/claude-models.json`
-- sets `model_fast` to `claude-haiku-4-5-20251001` for Codex side-band tasks
-- lets you choose the default Codex reasoning level for the generated model catalog
-- lets you choose the Codex MultiAgentV2 sub-agent concurrency limit
-- enables the Codex MultiAgentV2 feature block required for sub-agent handoff
-- sets the Codex profile command to `codex -p claude`
-
-The generated profile uses provider id `anthropic`, context name `claude`, fast model `claude-haiku-4-5-20251001`, and model catalog `~/.codex/claude-models.json`.
-
-With `--preset deepseek`, the generated profile uses provider id `deepseek`, context name `deepseek`, fast model `deepseek-v4-flash`, and model catalog `~/.codex/deepseek-models.json`. DeepSeek credentials are stored by `auth2api --login --provider=deepseek` under the configured `auth-dir`.
+- `~/.codex/config.toml` — provider block and MultiAgentV2 settings
+- `~/.codex/{claude,deepseek}.config.toml` — context with model, fast model, catalog path, context window
+- `~/.codex/{claude,deepseek}-models.json` — model catalog with backend-specific `base_instructions` from `docs/prompts/`
+- `~/.codex/agents/general-purpose-{gpt,claude,deepseek}.toml` — agent definitions with the matching system prompt
 
 ### Codex config for sub-agents and cross-provider calls
 
@@ -453,28 +417,6 @@ Reasoning level choices in the wizard:
 | Medium reasoning (recommended) | `8192` tokens          |
 | High reasoning              | `24576` tokens            |
 | Extra-high reasoning        | `32768` tokens            |
-
-Non-interactive usage:
-
-```bash
-# Preview without writing
-./codex-manager --yes --dry-run
-
-# Write defaults
-./codex-manager --yes
-
-# Write with a specific default reasoning level
-./codex-manager --yes --reasoning-level high
-
-# Write with a specific sub-agent concurrency limit
-./codex-manager --yes --max-concurrent-threads-per-session 8
-
-# Use manual callback URL paste if the browser callback cannot reach localhost
-./codex-manager --manual-login
-
-# Write Codex config even before logging in
-./codex-manager --skip-login-check
-```
 
 ### System prompts
 
