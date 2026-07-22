@@ -1,7 +1,5 @@
 # auth2api
 
-[中文](./README_CN.md)
-
 A lightweight OAuth-to-API proxy that turns your Claude (Anthropic), ChatGPT (OpenAI Codex), DeepSeek API key, and experimental local Cursor login into usable API endpoints for Claude Code and OpenAI-compatible clients.
 
 auth2api is intentionally small and focused:
