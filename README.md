@@ -15,7 +15,7 @@ It is not trying to be a large multi-provider gateway. If you want a compact, un
 ```bash
 git clone https://github.com/apohl79/auth2api
 cd auth2api && git checkout main-fork
-npm install && npm run build
+./install.sh
 
 # Zero-config: starts provider login and writes all Codex files
 ./codex-manager
