@@ -476,6 +476,34 @@ Non-interactive usage:
 ./codex-manager --skip-login-check
 ```
 
+### System prompts
+
+`codex-manager` reads backend-specific system prompts from `docs/prompts/` and writes them into the generated Codex model catalog and agent definitions:
+
+| File | Backend | Purpose |
+| ---- | ------- | ------- |
+| `docs/prompts/gpt.md` | OpenAI (GPT) | Used for `gpt-5.6-*` model entries and the `general-purpose-gpt` agent |
+| `docs/prompts/claude.md` | Anthropic (Claude) | Used for Claude model entries and the `general-purpose-claude` agent |
+| `docs/prompts/deepseek.md` | DeepSeek | Used for DeepSeek model entries and the `general-purpose-deepseek` agent |
+
+The prompts share the same Codex tool discipline (task completion, autonomy tiers, repository work, destructive action safeguards, git hygiene) but differ in communication style and emphasis:
+
+- **GPT** (`gpt.md`) — Rich personality, collaborative thought-partner tone, CommonMark formatting rules, visualizations guidance.
+- **Claude** (`claude.md`) — Outcome-first, terse. No code comments beyond constraint documentation. No backwards-compatibility hacks. Security-conscious (OWASP top 10). Ambitious-task framing.
+- **DeepSeek** (`deepseek.md`) — Based on the GPT prompt with a note about no vision/image support and 1M token context window awareness.
+
+Edit the markdown files directly to customize prompts per backend. The files are plain markdown — no template variables or string substitution.
+
+#### Updating the GPT model cache
+
+To sync the `gpt.md` prompt into Codex's cached model definitions for the OpenAI provider:
+
+```bash
+./codex-manager --update-models-cache
+```
+
+This reads `docs/prompts/gpt.md` and writes its content into `base_instructions` for all `gpt-5.6-*` model entries in `~/.codex/models_cache.json`. A timestamped backup is created before writing.
+
 ## Multi-account
 
 auth2api supports multiple Claude OAuth accounts. Each account is stored as a separate token file in the auth directory.
