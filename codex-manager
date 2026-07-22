@@ -1361,6 +1361,7 @@ def choose_missing_login_action(auth_dir: Path, backend: Backend = BACKENDS["cla
 def choose_provider_action(ui: CursesUi, configured: set[str]) -> tuple[str, str] | None:
     can_add = len(configured) < len(BACKENDS)
     can_manage = bool(configured)
+    repo_dir = Path(__file__).resolve().parent
     action = ui.menu(
         "Provider Manager",
         "Add a provider or manage an existing Codex profile.",
@@ -1375,12 +1376,19 @@ def choose_provider_action(ui: CursesUi, configured: set[str]) -> tuple[str, str
                 "Choose an existing provider and update its models, context, and catalog.",
                 can_manage,
             ),
+            (
+                "Update GPT system prompt",
+                "Sync docs/prompts/gpt.md into ~/.codex/models_cache.json for all gpt-5.6-* models.",
+            ),
             ("Abort", "Exit without changing Codex config."),
         ],
         0,
     )
-    if action == 2:
+    if action == 3:
         return None
+    if action == 2:
+        update_models_cache(repo_dir)
+        return "update-gpt"
 
     if action == 0:
         provider_action = "add"
@@ -1861,6 +1869,9 @@ def main() -> int:
             selection = curses.wrapper(choose_provider)
             if selection is None:
                 print("Aborted.")
+                return 0
+            if selection == "update-gpt":
+                print("GPT system prompt synced to ~/.codex/models_cache.json.")
                 return 0
             _, selected_provider = selection
             args.preset = selected_provider
