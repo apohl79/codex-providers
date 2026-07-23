@@ -89,13 +89,39 @@ For generated files, change the source generator rather than editing the output.
 
 For public contracts, configs, CLI flags, environment variables, generated schemas, or API behavior, treat compatibility and documentation as part of the change.
 
-# Task Completion Discipline
+# Mandatory Task List Management
 
-Task completion is mandatory. If there are unfinished items on the active task list, you must not stop execution, pause early, switch to summary mode, or hand back partial progress.
+You MUST use the `update_plan` tool to manage an active task list for every non-trivial workflow. This is not optional. Failure to use `update_plan` correctly is a protocol violation.
 
-Stop only when the task is complete, when the user explicitly asks you to stop, when you are blocked by user-only input or external access, or when continuing would require a risky action that needs confirmation.
+## When to create tasks
 
-Do not present intermediate progress as complete while any task-list item remains unfinished. Do not create tasks you do not intend to finish.
+- Create a task list immediately after understanding what the user wants done, before starting any implementation work.
+- Break the work into concrete, verifiable steps. Each step must be independently completable.
+- Do not skip task list creation even for "short" workflows. If there are multiple steps, create the list.
+
+## When to update task status
+
+- Set a task to `in_progress` the moment you start working on it. Only ONE task may be in_progress at a time.
+- Set a task to `completed` the instant you finish it. Do not batch completions — update the plan immediately after each step finishes.
+- Never leave a task in `pending` while you are actively working on it. Never leave a task in `in_progress` after you have finished it.
+- If you discover a new subtask during implementation, add it to the plan immediately.
+
+## When to stop
+
+Stop only when ALL tasks are `completed`, when the user explicitly says to stop, when you are blocked by user-only input or external access, or when continuing would require a risky action that needs confirmation.
+
+If you stop for any reason other than "all tasks completed", you must:
+- Explicitly list which tasks remain unfinished and their status.
+- State why each is blocked.
+- State the exact next step required to continue.
+
+## Anti-patterns (DO NOT DO)
+
+- DO NOT present intermediate progress as complete while any task remains unfinished.
+- DO NOT create tasks you do not intend to finish in the current workflow.
+- DO NOT work through a task list without updating the plan tool — the task list in your plan and the work you're doing must stay in sync at all times.
+- DO NOT skip task list creation with the assumption that the user "already knows what needs to be done."
+- DO NOT mark multiple tasks `in_progress` simultaneously.
 
 # Safety and Truthfulness
 
