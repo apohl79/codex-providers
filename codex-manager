@@ -1135,7 +1135,7 @@ def _openai_model_prices() -> dict:
 
 
 def _update_openai_config_prices(codex_home: Path) -> None:
-    """Write GPT pricing to ~/.codex/openai-prices.config.toml (included by config.toml)."""
+    """Write GPT pricing inline into ~/.codex/config.toml under [model_providers.openai.model_prices]."""
     config_path = codex_home / "config.toml"
     if not config_path.exists():
         return
@@ -1159,11 +1159,8 @@ def _update_openai_config_prices(codex_home: Path) -> None:
     if merged == existing_prices:
         return  # no changes
 
-    # Rebuild the config.toml with updated model_prices
-    original = config_path.read_text()
-    # Simple approach: write a separate provider config include file
-    prices_path = codex_home / "openai-prices.config.toml"
-    lines = ["[model_providers.openai.model_prices]"]
+    # Build the model_prices TOML block
+    price_lines = ["[model_providers.openai.model_prices]"]
     for model_id in sorted(merged):
         prices = merged[model_id]
         parts = [f"input_price_per_1m_tokens = {prices['input']}"]
@@ -1176,10 +1173,67 @@ def _update_openai_config_prices(codex_home: Path) -> None:
             parts.append(f"long_context_cached_input_price_per_1m_tokens = {prices['long_cached_input']}")
         if prices.get("long_output") is not None:
             parts.append(f"long_context_output_price_per_1m_tokens = {prices['long_output']}")
-        lines.append(f'{toml_string(model_id)} = {{ {", ".join(parts)} }}')
-    prices_path.write_text("\n".join(lines) + "\n")
-    os.chmod(prices_path, 0o600)
-    print(f"Updated OpenAI prices in {prices_path}")
+        price_lines.append(f'{toml_string(model_id)} = {{ {", ".join(parts)} }}')
+    price_block = "\n".join(price_lines) + "\n"
+
+    # Insert or replace the model_prices section in config.toml
+    original = config_path.read_text()
+    section_header = "[model_providers.openai.model_prices]"
+    if section_header in original:
+        # Replace existing section: remove everything from the header to the next
+        # top-level section or EOF
+        lines = original.splitlines(keepends=True)
+        result = []
+        skip = False
+        for line in lines:
+            if line.strip() == section_header:
+                if not skip:
+                    result.append(price_block)
+                skip = True
+                continue
+            if skip and line.startswith("[") and not line.startswith("[" + section_header[1:]):
+                # Next top-level section — stop skipping
+                skip = False
+                result.append(line)
+                continue
+            if not skip:
+                result.append(line)
+        updated = "".join(result)
+    else:
+        # Insert after the [model_providers.openai] provider block
+        lines = original.splitlines(keepends=True)
+        result = []
+        inserted = False
+        i = 0
+        while i < len(lines):
+            stripped = lines[i].strip()
+            if stripped == "[model_providers.openai]":
+                result.append(lines[i])
+                i += 1
+                # Walk through the openai block until the next section
+                while i < len(lines):
+                    s = lines[i].strip()
+                    if s.startswith("[") and s != stripped:
+                        # Next top-level section — insert prices before it
+                        result.append("\n" + price_block)
+                        result.append(lines[i])
+                        inserted = True
+                        i += 1
+                        break
+                    result.append(lines[i])
+                    i += 1
+                continue
+            result.append(lines[i])
+            i += 1
+        if not inserted:
+            result.append("\n" + price_block)
+        updated = "".join(result)
+
+    backup_path = backup(config_path)
+    config_path.write_text(updated)
+    print(f"Updated OpenAI prices in {config_path}")
+    if backup_path:
+        print(f"Backup: {backup_path}")
 
 
 def provider_block(draft: Draft, repo_dir: Path, auth2api_config: Path) -> str:
@@ -1532,7 +1586,7 @@ def choose_provider_action(ui: CursesUi, configured: set[str]) -> tuple[str, str
             ),
             (
                "Update GPT models & pricing",
-                "Sync gpt.md system prompt into models_cache.json and GPT pricing into openai-prices.config.toml.",
+                "Sync gpt.md system prompt into models_cache.json and GPT pricing into config.toml.",
            ),
             ("Abort", "Exit without changing Codex config."),
         ],
@@ -1886,7 +1940,7 @@ def noninteractive_draft(
 
 
 def update_models_cache(repo_dir: Path) -> int:
-    """Sync gpt.md system prompt into models_cache.json and GPT pricing into openai-prices.config.toml."""
+    """Sync gpt.md system prompt into models_cache.json and GPT pricing into config.toml."""
     codex_home = Path.home() / ".codex"
     cache_path = codex_home / "models_cache.json"
     gpt_prompt = load_prompt(repo_dir, "gpt")
@@ -1970,7 +2024,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--update-models-cache",
         action="store_true",
-        help="Sync gpt.md system prompt into models_cache.json and GPT pricing into openai-prices.config.toml.",
+        help="Sync gpt.md system prompt into models_cache.json and GPT pricing into config.toml.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview writes without changing files.")
     parser.add_argument("--manual-login", action="store_true", help="Use manual callback URL paste when running Claude login.")
@@ -2027,7 +2081,7 @@ def main() -> int:
                 print("Aborted.")
                 return 0
             if selection == "update-gpt":
-                print("GPT system prompt synced to models_cache.json, pricing synced to openai-prices.config.toml.")
+                print("GPT system prompt synced to models_cache.json, pricing synced to config.toml.")
                 return 0
             _, selected_provider = selection
             args.preset = selected_provider
