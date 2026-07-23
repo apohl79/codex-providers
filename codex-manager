@@ -1531,8 +1531,8 @@ def choose_provider_action(ui: CursesUi, configured: set[str]) -> tuple[str, str
                 can_manage,
             ),
             (
-                "Update GPT system prompt",
-                "Sync docs/prompts/gpt.md into ~/.codex/models_cache.json for all gpt-5.6-* models.",
+                "Update GPT models & pricing",
+                "Sync docs/prompts/gpt.md system prompt and latest OpenAI pricing into ~/.codex/models_cache.json.",
             ),
             ("Abort", "Exit without changing Codex config."),
         ],
@@ -1886,7 +1886,7 @@ def noninteractive_draft(
 
 
 def update_models_cache(repo_dir: Path) -> int:
-    """Update ~/.codex/models_cache.json with the gpt.md prompt."""
+    """Sync gpt.md system prompt and OpenAI pricing into ~/.codex/models_cache.json."""
     codex_home = Path.home() / ".codex"
     cache_path = codex_home / "models_cache.json"
     gpt_prompt = load_prompt(repo_dir, "gpt")
@@ -1970,7 +1970,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--update-models-cache",
         action="store_true",
-        help="Update ~/.codex/models_cache.json with the gpt.md prompt definition for the gpt-5.6-sol model.",
+        help="Sync gpt.md system prompt and latest OpenAI pricing into ~/.codex/models_cache.json.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview writes without changing files.")
     parser.add_argument("--manual-login", action="store_true", help="Use manual callback URL paste when running Claude login.")
@@ -2027,7 +2027,7 @@ def main() -> int:
                 print("Aborted.")
                 return 0
             if selection == "update-gpt":
-                print("GPT system prompt synced to ~/.codex/models_cache.json.")
+                print("GPT models & pricing synced to ~/.codex/models_cache.json.")
                 return 0
             _, selected_provider = selection
             args.preset = selected_provider
