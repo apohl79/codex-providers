@@ -1135,7 +1135,7 @@ def _openai_model_prices() -> dict:
 
 
 def _update_openai_config_prices(codex_home: Path) -> None:
-    """Add or update OpenAI model_prices in ~/.codex/config.toml."""
+    """Write GPT pricing to ~/.codex/openai-prices.config.toml (included by config.toml)."""
     config_path = codex_home / "config.toml"
     if not config_path.exists():
         return
