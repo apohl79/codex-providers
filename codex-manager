@@ -1532,7 +1532,7 @@ def choose_provider_action(ui: CursesUi, configured: set[str]) -> tuple[str, str
             ),
             (
                "Update GPT models & pricing",
-                "Sync gpt.md system prompt into models_cache.json and latest OpenAI pricing into openai-prices.config.toml.",
+                "Sync gpt.md system prompt into models_cache.json and GPT pricing into openai-prices.config.toml.",
            ),
             ("Abort", "Exit without changing Codex config."),
         ],
@@ -1886,7 +1886,7 @@ def noninteractive_draft(
 
 
 def update_models_cache(repo_dir: Path) -> int:
-    """Sync gpt.md system prompt and OpenAI pricing into ~/.codex/models_cache.json."""
+    """Sync gpt.md system prompt into models_cache.json and GPT pricing into openai-prices.config.toml."""
     codex_home = Path.home() / ".codex"
     cache_path = codex_home / "models_cache.json"
     gpt_prompt = load_prompt(repo_dir, "gpt")
@@ -1970,7 +1970,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--update-models-cache",
         action="store_true",
-        help="Sync gpt.md system prompt into models_cache.json and OpenAI pricing into openai-prices.config.toml.",
+        help="Sync gpt.md system prompt into models_cache.json and GPT pricing into openai-prices.config.toml.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview writes without changing files.")
     parser.add_argument("--manual-login", action="store_true", help="Use manual callback URL paste when running Claude login.")

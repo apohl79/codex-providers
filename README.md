@@ -30,7 +30,7 @@ codex -p deepseek
 
 - **Codex integration** — `codex-manager` curses wizard writes all Codex config files (`~/.codex/*.config.toml`, model catalogs, agent definitions) for Claude, DeepSeek, and GPT backends. Starts provider login flows automatically. Non-interactive mode available (`--yes`).
 - **Fixed translation layer** — the upstream OpenAI→Anthropic translator didn't handle Codex's wire format correctly: Claude models broke on tool calls and structured output, DeepSeek's Anthropic-compatible endpoint was untested. Both are now working, including streaming, reasoning, tool use, and image passthrough (for providers that support it).
-- **Per-backend system prompts** — `docs/prompts/{gpt,claude,deepseek}.md` load as `base_instructions` in generated model catalogs and agent TOML files. Edit the markdown directly to customize behavior per backend. `--update-models-cache` syncs `gpt.md` into `~/.codex/models_cache.json`.
+- **Per-backend system prompts** — `docs/prompts/{gpt,claude,deepseek}.md` load as `base_instructions` in generated model catalogs and agent TOML files. Edit the markdown directly to customize behavior per backend. `--update-models-cache` syncs `gpt.md` into `~/.codex/models_cache.json` and GPT pricing into `openai-prices.config.toml`.
 - **Codex-optimized prompts** — each prompt is tuned for the apohl79 Codex fork: GPT gets the full collaborative thought-partner style with CommonMark and visualization guidance. Claude gets outcome-first terseness, zero-comment policy, no compat hacks, OWASP security awareness. DeepSeek gets the GPT baseline plus explicit vision-unsupported notice.
 - **Claude & DeepSeek fixes** — current Claude model defaults (`claude-opus-4-8`, `claude-fable-5`, `claude-sonnet-5`, `claude-haiku-4-5`). DeepSeek profiles with correct model config (text-only — DeepSeek's Anthropic API rejects `type: "image"`). Claude Code `[1m]` suffix handling. Responses custom-tool compatibility for freeform tools such as `apply_patch`.
 - **Lightweight by design** — small codebase, minimal moving parts
@@ -442,7 +442,7 @@ To sync the `gpt.md` prompt into Codex's cached model definitions for the OpenAI
 ./codex-manager --update-models-cache
 ```
 
-This reads `docs/prompts/gpt.md` and writes its content into `base_instructions` for all `gpt-5.6-*` model entries in `~/.codex/models_cache.json`. A timestamped backup is created before writing.
+This reads `docs/prompts/gpt.md` and writes its content into `base_instructions` for all `gpt-5.6-*` model entries in `~/.codex/models_cache.json`, then writes GPT pricing into `~/.codex/openai-prices.config.toml`. A timestamped backup is created before writing.
 
 ## Multi-account
 
