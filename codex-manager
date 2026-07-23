@@ -1147,8 +1147,6 @@ def _update_openai_config_prices(codex_home: Path) -> None:
 
     providers = config.get("model_providers", {})
     openai = providers.get("openai", {})
-    if not openai:
-        return
 
     existing_prices = openai.get("model_prices", {})
     new_prices = _openai_model_prices()
@@ -1179,6 +1177,7 @@ def _update_openai_config_prices(codex_home: Path) -> None:
     # Insert or replace the model_prices section in config.toml
     original = config_path.read_text()
     section_header = "[model_providers.openai.model_prices]"
+    provider_header = "[model_providers.openai]"
     if section_header in original:
         # Replace existing section: remove everything from the header to the next
         # top-level section or EOF
@@ -1199,22 +1198,20 @@ def _update_openai_config_prices(codex_home: Path) -> None:
             if not skip:
                 result.append(line)
         updated = "".join(result)
-    else:
-        # Insert after the [model_providers.openai] provider block
+    elif provider_header in original:
+        # Provider section exists but no model_prices — append prices after it
         lines = original.splitlines(keepends=True)
         result = []
         inserted = False
         i = 0
         while i < len(lines):
             stripped = lines[i].strip()
-            if stripped == "[model_providers.openai]":
+            if stripped == provider_header:
                 result.append(lines[i])
                 i += 1
-                # Walk through the openai block until the next section
                 while i < len(lines):
                     s = lines[i].strip()
                     if s.startswith("[") and s != stripped:
-                        # Next top-level section — insert prices before it
                         result.append("\n" + price_block)
                         result.append(lines[i])
                         inserted = True
@@ -1228,6 +1225,9 @@ def _update_openai_config_prices(codex_home: Path) -> None:
         if not inserted:
             result.append("\n" + price_block)
         updated = "".join(result)
+    else:
+        # No openai provider section at all — append both headers at end
+        updated = original.rstrip("\n") + "\n\n" + provider_header + "\n" + price_block
 
     backup_path = backup(config_path)
     config_path.write_text(updated)
