@@ -1031,6 +1031,116 @@ max_concurrent_threads_per_session = {max_concurrent_threads_per_session}
 """.strip()
 
 
+def _model_prices_toml(draft: Draft) -> str:
+    """Generate the [model_providers.<id>.model_prices] TOML section."""
+    backend_key = draft.backend.key
+
+    if backend_key == "claude":
+        entries = _claude_model_prices()
+    elif backend_key == "deepseek":
+        entries = _deepseek_model_prices()
+    else:
+        return ""
+
+    lines = []
+    for model_id, prices in sorted(entries.items()):
+        parts = [f'input_price_per_1m_tokens = {prices["input"]}']
+        if prices.get("cached_input") is not None:
+            parts.append(f'cached_input_price_per_1m_tokens = {prices["cached_input"]}')
+        parts.append(f'output_price_per_1m_tokens = {prices["output"]}')
+        lines.append(
+            f"{toml_string(model_id)} = {{ {', '.join(parts)} }}"
+        )
+    lines.insert(0, f"[model_providers.{draft.provider_id}.model_prices]")
+    return "\n".join(lines)
+
+
+def _claude_model_prices() -> dict:
+    """Return dict of model_id -> {input, cached_input, output} in USD per 1M tokens.
+
+    Source: https://platform.claude.com/docs/en/about-claude/pricing (API / first-party).
+    """
+    return {
+        "claude-opus-4-8": {"input": 5.0, "cached_input": 0.50, "output": 25.0},
+        "claude-fable-5": {"input": 10.0, "cached_input": 1.0, "output": 50.0},
+        "claude-sonnet-5": {"input": 2.0, "cached_input": 0.20, "output": 10.0},
+        "claude-haiku-4-5": {"input": 1.0, "cached_input": 0.10, "output": 5.0},
+        "claude-haiku-4-5-20251001": {"input": 1.0, "cached_input": 0.10, "output": 5.0},
+    }
+
+
+def _deepseek_model_prices() -> dict:
+    """Return dict of model_id -> {input, cached_input, output} in USD per 1M tokens.
+
+    Source: https://api-docs.deepseek.com/quick_start/pricing/
+    """
+    return {
+        "deepseek-v4-pro": {"input": 0.435, "cached_input": 0.003625, "output": 0.87},
+        "deepseek-v4-flash": {"input": 0.14, "cached_input": 0.0028, "output": 0.28},
+    }
+
+
+def _openai_model_prices() -> dict:
+    """Return dict of model_id -> {input, cached_input, output} in USD per 1M tokens.
+
+    Source: https://developers.openai.com/api/docs/pricing
+    Uses short-context (≤272K) pricing for tiered models.
+    """
+    return {
+        "gpt-5.6-sol": {"input": 5.0, "cached_input": 0.50, "output": 30.0},
+        "gpt-5.6-terra": {"input": 2.50, "cached_input": 0.25, "output": 15.0},
+        "gpt-5.6-luna": {"input": 1.0, "cached_input": 0.10, "output": 6.0},
+        "gpt-5.5": {"input": 5.0, "cached_input": 0.50, "output": 30.0},
+        "gpt-5.5-pro": {"input": 30.0, "output": 180.0},
+        "gpt-5.4": {"input": 2.50, "cached_input": 0.25, "output": 15.0},
+        "gpt-5.4-mini": {"input": 0.75, "cached_input": 0.075, "output": 4.50},
+        "gpt-5-codex": {"input": 5.0, "cached_input": 0.50, "output": 30.0},
+        "gpt-5.1-codex-max": {"input": 5.0, "cached_input": 0.50, "output": 30.0},
+    }
+
+
+def _update_openai_config_prices(codex_home: Path) -> None:
+    """Add or update OpenAI model_prices in ~/.codex/config.toml."""
+    config_path = codex_home / "config.toml"
+    if not config_path.exists():
+        return
+
+    try:
+        config = tomllib.loads(config_path.read_text())
+    except Exception:
+        return
+
+    providers = config.get("model_providers", {})
+    openai = providers.get("openai", {})
+    if not openai:
+        return
+
+    existing_prices = openai.get("model_prices", {})
+    new_prices = _openai_model_prices()
+    # Merge: keep existing user overrides, fill in missing models
+    merged = dict(new_prices)
+    merged.update(existing_prices)
+
+    if merged == existing_prices:
+        return  # no changes
+
+    # Rebuild the config.toml with updated model_prices
+    original = config_path.read_text()
+    # Simple approach: write a separate provider config include file
+    prices_path = codex_home / "openai-prices.config.toml"
+    lines = ["[model_providers.openai.model_prices]"]
+    for model_id in sorted(merged):
+        prices = merged[model_id]
+        parts = [f'input_price_per_1m_tokens = {prices["input"]}']
+        if prices.get("cached_input") is not None:
+            parts.append(f'cached_input_price_per_1m_tokens = {prices["cached_input"]}')
+        parts.append(f'output_price_per_1m_tokens = {prices["output"]}')
+        lines.append(f'{toml_string(model_id)} = {{ {", ".join(parts)} }}')
+    prices_path.write_text("\n".join(lines) + "\n")
+    os.chmod(prices_path, 0o600)
+    print(f"Updated OpenAI prices in {prices_path}")
+
+
 def provider_block(draft: Draft, repo_dir: Path, auth2api_config: Path) -> str:
     node = shutil.which("node") or "node"
     auth_command = " ".join(
@@ -1044,6 +1154,7 @@ def provider_block(draft: Draft, repo_dir: Path, auth2api_config: Path) -> str:
         ]
     )
     args = json.dumps(["-e", auth_command])
+    prices_toml = _model_prices_toml(draft)
     return f"""
 [model_providers.{draft.provider_id}]
 name = {toml_string(draft.display_name)}
@@ -1060,6 +1171,8 @@ args = {args}
 cwd = {toml_string(str(repo_dir))}
 timeout_ms = 5000
 refresh_interval_ms = 300000
+
+{prices_toml}
 """.strip()
 
 
@@ -1756,7 +1869,7 @@ def update_models_cache(repo_dir: Path) -> int:
         if not isinstance(model, dict):
             continue
         slug = model.get("slug") or model.get("id") or ""
-        if slug == OPENAI_GENERAL_AGENT_MODEL or slug.startswith("gpt-5.6"):
+        if slug == OPENAI_GENERAL_AGENT_MODEL or slug.startswith("gpt-5.6") or slug.startswith("gpt-5.5") or slug.startswith("gpt-5.4"):
             model["base_instructions"] = gpt_prompt
             updated += 1
 
@@ -1769,6 +1882,8 @@ def update_models_cache(repo_dir: Path) -> int:
     print(f"Updated {updated} model(s) in {cache_path}")
     if backup_path:
         print(f"Backup: {backup_path}")
+
+    _update_openai_config_prices(codex_home)
     return 0
 
 
