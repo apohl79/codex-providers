@@ -1014,7 +1014,7 @@ def remove_toml_blocks(content: str, names: set[str]) -> str:
 
 
 def remove_provider_blocks(content: str, provider_id: str) -> str:
-    names = {f"model_providers.{provider_id}", f"model_providers.{provider_id}.auth"}
+    names = {f"model_providers.{provider_id}", f"model_providers.{provider_id}.auth", f"model_providers.{provider_id}.model_prices"}
     return remove_toml_blocks(content, names)
 
 
