@@ -1306,17 +1306,25 @@ def agent_definitions(draft: Draft, repo_dir: Path) -> tuple[AgentDefinition, ..
     backend_agent_name = sanitize_identifier(draft.backend.key)
     gpt_prompt = load_prompt(repo_dir, "gpt")
     backend_prompt = load_prompt(repo_dir, draft.backend.key)
-    return (
-        AgentDefinition(
-            path=agents_dir / "general-purpose-gpt.toml",
-            content=agent_content(
-                "general-purpose-gpt",
-                f"General-purpose OpenAI-backed agent using provider openai and model {OPENAI_GENERAL_AGENT_MODEL}.",
-                "openai",
-                OPENAI_GENERAL_AGENT_MODEL,
-                gpt_prompt,
+
+    definitions = []
+
+    gpt_path = agents_dir / "general-purpose-gpt.toml"
+    if not gpt_path.exists():
+        definitions.append(
+            AgentDefinition(
+                path=gpt_path,
+                content=agent_content(
+                    "general-purpose-gpt",
+                    f"General-purpose OpenAI-backed agent using provider openai and model {OPENAI_GENERAL_AGENT_MODEL}.",
+                    "openai",
+                    OPENAI_GENERAL_AGENT_MODEL,
+                    gpt_prompt,
+                ),
             ),
-        ),
+        )
+
+    definitions.append(
         AgentDefinition(
             path=agents_dir / f"general-purpose-{backend_agent_name}.toml",
             content=agent_content(
@@ -1328,6 +1336,8 @@ def agent_definitions(draft: Draft, repo_dir: Path) -> tuple[AgentDefinition, ..
             ),
         ),
     )
+
+    return tuple(definitions)
 
 
 def backup(path: Path) -> Path | None:
