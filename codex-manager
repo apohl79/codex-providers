@@ -883,9 +883,9 @@ def with_catalog_schema(entry: dict, backend: Backend) -> dict:
     }
     for key, value in defaults.items():
         updated.setdefault(key, value)
-    if backend.key == "deepseek":
+    if backend.key in {"claude", "deepseek"}:
         # auth2api translates Responses function tools to Anthropic tools. Its
-        # custom freeform code-mode tool is not forwarded to DeepSeek.
+        # custom freeform code-mode tool is not forwarded to Anthropic-backed providers.
         updated["tool_mode"] = "direct"
     return updated
 

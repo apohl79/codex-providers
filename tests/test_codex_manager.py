@@ -279,6 +279,17 @@ class DeepSeekBackendTest(unittest.TestCase):
 
         self.assertEqual(catalog["models"][0]["tool_mode"], "direct")
 
+    def test_claude_catalog_uses_direct_tools_for_anthropic_bridge(self) -> None:
+        catalog = codex_manager.build_catalog(
+            ("claude-opus-4-8",),
+            codex_manager.BACKENDS["claude"],
+            {"models": [{"slug": "claude-opus-4-8", "tool_mode": "code_mode_only"}]},
+            400000,
+            "medium",
+        )
+
+        self.assertEqual(catalog["models"][0]["tool_mode"], "direct")
+
 
 class ProviderMenuTest(unittest.TestCase):
     class FakeUi:
