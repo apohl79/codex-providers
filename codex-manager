@@ -1280,10 +1280,9 @@ def context_content(draft: Draft) -> str:
         f"model_context_window = {draft.context_window}",
         f"model_auto_compact_token_limit = {draft.compact_limit}",
     ]
-    if draft.backend.key == "deepseek":
-        # DeepSeek does not advertise Codex service tiers. Override a global
-        # `priority` default so Codex sends the provider's standard tier.
-        lines.append('service_tier = "default"')
+    # auth2api backends do not use Codex service tiers. Override any
+    # global default so Codex sends the provider's standard tier.
+    lines.append('service_tier = "default"')
     lines.append("")
     return "\n".join(lines)
 
