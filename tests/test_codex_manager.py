@@ -247,6 +247,19 @@ class DeepSeekBackendTest(unittest.TestCase):
             self.assertIn('service_tier = "default"', codex_manager.context_content(draft))
             provider = codex_manager.provider_block(draft, root, root / "config.yaml")
             self.assertIn("[model_providers.deepseek]", provider)
+            self.assertIn("namespace_tools = false", provider)
+
+            claude_provider = codex_manager.provider_block(
+                codex_manager.replace(
+                    draft,
+                    provider_id="anthropic",
+                    display_name="Claude",
+                    backend=codex_manager.BACKENDS["claude"],
+                ),
+                root,
+                root / "config.yaml",
+            )
+            self.assertIn("namespace_tools = false", claude_provider)
 
     def test_deepseek_catalog_contains_required_codex_model_fields(self) -> None:
         catalog = codex_manager.build_catalog(

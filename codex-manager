@@ -1257,7 +1257,9 @@ base_url = {toml_string(draft.base_url)}
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
-namespace_tools = {str(draft.backend.key != 'deepseek').lower()}
+# auth2api's Responses-to-Anthropic bridge forwards flat function/custom tools;
+# namespace tools are not represented in the Anthropic Messages request.
+namespace_tools = false
 stream_idle_timeout_ms = 600000
 
 [model_providers.{draft.provider_id}.auth]
