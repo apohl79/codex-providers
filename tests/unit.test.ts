@@ -424,8 +424,10 @@ test("resolveModel maps aliases", () => {
   assert.equal(resolveModel("fable[1m]"), "claude-fable-5");
   assert.equal(resolveModel("opus"), "claude-opus-4-8");
   assert.equal(resolveModel("opus[1M]"), "claude-opus-4-8");
+  assert.equal(resolveModel("opus-5"), "claude-opus-5");
   assert.equal(resolveModel("claude-opus-4-7"), "claude-opus-4-8");
   assert.equal(resolveModel("claude-opus-4-8[1m]"), "claude-opus-4-8");
+  assert.equal(resolveModel("claude-opus-5[1m]"), "claude-opus-5");
   assert.equal(resolveModel("sonnet"), "claude-sonnet-5");
   assert.equal(resolveModel("sonnet[1m]"), "claude-sonnet-5");
   assert.equal(resolveModel("claude-sonnet-4-6"), "claude-sonnet-5");
@@ -439,6 +441,7 @@ test("resolveModel passes through unknown models", () => {
   assert.equal(resolveModel("claude-fable-5"), "claude-fable-5");
   assert.equal(resolveModel("claude-sonnet-5"), "claude-sonnet-5");
   assert.equal(resolveModel("claude-opus-4-8"), "claude-opus-4-8");
+  assert.equal(resolveModel("claude-opus-5"), "claude-opus-5");
   assert.equal(resolveModel("claude-opus-4-6"), "claude-opus-4-6");
 });
 
@@ -517,6 +520,23 @@ test("openaiToAnthropic translates reasoning_effort to thinking", () => {
   });
   assert.equal(result.thinking.type, "enabled");
   assert.equal(result.thinking.budget_tokens, 24576);
+});
+
+test("openaiToAnthropic uses adaptive thinking for Claude Opus 5", () => {
+  const result = openaiToAnthropic({
+    model: "opus-5",
+    reasoning_effort: "medium",
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "answer", schema: { type: "object" } },
+    },
+    messages: [{ role: "user", content: "hi" }],
+  });
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, {
+    effort: "medium",
+    format: { type: "json_schema", schema: { type: "object" }, name: "answer" },
+  });
 });
 
 test("openaiToAnthropic replays DeepSeek reasoning_content with tool calls", () => {
@@ -944,6 +964,16 @@ test("responsesToAnthropic translates reasoning with summary", () => {
   assert.equal(result.thinking.type, "enabled");
   assert.equal(result.thinking.budget_tokens, 24576);
   assert.equal(result.thinking.display, "summarized");
+});
+
+test("responsesToAnthropic uses adaptive thinking for Claude Opus 5", () => {
+  const result = responsesToAnthropic({
+    model: "claude-opus-5",
+    reasoning: { effort: "xhigh", summary: "concise" },
+    input: [{ role: "user", content: "hi" }],
+  });
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "xhigh" });
 });
 
 test("responsesToAnthropic replays reasoning before a DeepSeek tool call", () => {

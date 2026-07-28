@@ -39,10 +39,12 @@ function formatResponsesUsage(
 const MODEL_ALIASES: Record<string, string> = {
   fable: "claude-fable-5",
   opus: "claude-opus-4-8",
+  "opus-5": "claude-opus-5",
   "opus-4.8": "claude-opus-4-8",
   sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5-20251001",
   "claude-fable-5": "claude-fable-5",
+  "claude-opus-5": "claude-opus-5",
   "claude-opus-4-8": "claude-opus-4-8",
   "claude-opus-4-7": "claude-opus-4-8",
   "claude-opus-4-6": "claude-opus-4-6",
@@ -83,6 +85,18 @@ function applyThinking(
   effort: string,
   summary?: string,
 ): void {
+  if (anthropicBody.model === "claude-opus-5") {
+    if (effort === "none") {
+      anthropicBody.thinking = { type: "disabled" };
+      return;
+    }
+    anthropicBody.thinking = { type: "adaptive" };
+    anthropicBody.output_config = {
+      ...(anthropicBody.output_config || {}),
+      effort,
+    };
+    return;
+  }
   if (effort === "none") {
     anthropicBody.thinking = { type: "disabled" };
     return;
@@ -295,6 +309,7 @@ export function openaiToAnthropic(body: any): any {
     const fmt = body.response_format;
     if (fmt.type === "json_schema" && fmt.json_schema) {
       anthropicBody.output_config = {
+        ...(anthropicBody.output_config || {}),
         format: {
           type: "json_schema",
           schema: fmt.json_schema.schema,
@@ -842,6 +857,7 @@ export function responsesToAnthropic(body: any): any {
     const fmt = body.text.format;
     if (fmt.type === "json_schema" && fmt.schema) {
       anthropicBody.output_config = {
+        ...(anthropicBody.output_config || {}),
         format: {
           type: "json_schema",
           schema: fmt.schema,

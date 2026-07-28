@@ -304,6 +304,20 @@ class DeepSeekBackendTest(unittest.TestCase):
         self.assertEqual(catalog["models"][0]["tool_mode"], "direct")
 
 
+class ClaudeOpus5SupportTest(unittest.TestCase):
+    def test_claude_fallback_and_alias_include_opus_5(self) -> None:
+        backend = codex_manager.BACKENDS["claude"]
+
+        self.assertEqual(backend.fallback_models[0], "claude-opus-5")
+        self.assertEqual(codex_manager.canonical_model("opus-5"), "claude-opus-5")
+
+    def test_claude_opus_5_uses_current_anthropic_token_prices(self) -> None:
+        self.assertEqual(
+            codex_manager._claude_model_prices()["claude-opus-5"],
+            {"input": 5.0, "cached_input": 0.50, "output": 25.0},
+        )
+
+
 class ProviderMenuTest(unittest.TestCase):
     class FakeUi:
         def __init__(self, selections: list[int]) -> None:

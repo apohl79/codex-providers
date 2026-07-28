@@ -74,6 +74,7 @@ test("providerForModel routes by model name", () => {
     assert.equal(registry.forModel("sonnet").id, "anthropic");
     assert.equal(registry.forModel("opus").id, "anthropic");
     assert.equal(registry.forModel("claude-opus-4-8").id, "anthropic");
+    assert.equal(registry.forModel("claude-opus-5").id, "anthropic");
     // Codex — gpt-5 family + o-series + codex- prefix
     assert.equal(registry.forModel("gpt-5").id, "codex");
     assert.equal(registry.forModel("gpt-5-codex").id, "codex");

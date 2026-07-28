@@ -203,6 +203,7 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 
 | Model ID                                             | Provider  | Description                                        |
 | ---------------------------------------------------- | --------- | -------------------------------------------------- |
+| `claude-opus-5`                                      | anthropic | Claude Opus 5                                      |
 | `claude-opus-4-8`                                    | anthropic | Claude Opus 4.8                                    |
 | `claude-fable-5`                                     | anthropic | Claude Fable 5                                     |
 | `claude-sonnet-5`                                    | anthropic | Claude Sonnet 5                                    |
@@ -227,6 +228,7 @@ Short convenience aliases accepted by auth2api:
 
 - `fable` -> `claude-fable-5`
 - `opus` -> `claude-opus-4-8`
+- `opus-5` -> `claude-opus-5`
 - `opus-4.8` -> `claude-opus-4-8`
 - `sonnet` -> `claude-sonnet-5`
 - `haiku` -> `claude-haiku-4-5-20251001`

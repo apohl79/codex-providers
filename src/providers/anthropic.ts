@@ -25,6 +25,7 @@ const ANTHROPIC_OAUTH: ProviderOAuthInfo = {
 const MODEL_RE = /^claude-/i;
 
 const ADVERTISED_MODELS = [
+  "claude-opus-5",
   "claude-opus-4-8",
   "claude-fable-5",
   "claude-sonnet-5",
