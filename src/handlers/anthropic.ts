@@ -197,10 +197,7 @@ export function createMessagesHandler(
       // Cursor speaks OpenAI Responses natively, but its callMessages will
       // re-encode the SSE stream as Anthropic Messages when invoked through
       // /v1/messages.
-      if (
-        provider.nativeFormat === "openai-responses" &&
-        provider.id !== "cursor"
-      ) {
+      if (provider.nativeFormat !== "anthropic-messages" && provider.id !== "cursor") {
         resp.status(400).json({
           error: {
             message: `This model is served by the ${provider.id} provider, which does not support /v1/messages.`,

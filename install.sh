@@ -137,11 +137,12 @@ PID_FILE="${AUTH2API_PID_FILE:-$LOG_DIR/server.pid}"
 
 usage() {
   cat <<USAGE
-Usage: auth2api [ensure|start|--login|<auth2api args>]
+Usage: auth2api [ensure|start|stop|--login|<auth2api args>]
 
 Commands:
   ensure   Start auth2api in the background unless its health endpoint is ready.
   start    Run auth2api in the foreground.
+  stop     Stop the background auth2api process started by this runner.
 
 All other arguments are passed to node dist/index.js with this repo's config.yaml.
 
@@ -275,6 +276,52 @@ start_background() {
   echo "$pid"
 }
 
+is_live_process() {
+  local pid state
+  pid="$1"
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return 1
+  fi
+  state="$(ps -p "$pid" -o stat= 2>/dev/null | tr -d '[:space:]')"
+  [[ -n "$state" && "$state" != Z* ]]
+}
+
+stop_server() {
+  if [[ ! -f "$PID_FILE" ]]; then
+    echo "No managed auth2api process found."
+    return 0
+  fi
+
+  local pid command
+  pid="$(tr -d '[:space:]' <"$PID_FILE")"
+  if ! [[ "$pid" =~ ^[1-9][0-9]*$ ]] || ! is_live_process "$pid"; then
+    rm -f "$PID_FILE"
+    echo "Removed stale auth2api PID file."
+    return 0
+  fi
+
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  if [[ "$command" != node\ * && "$command" != */node\ * ]] || \
+    [[ "$command" != *"$REPO_DIR/dist/index.js"* ]] || \
+    [[ "$command" != *"--config=$CONFIG_PATH"* ]]; then
+    echo "Error: refusing to stop PID $pid because it is not this runner's auth2api process." >&2
+    return 1
+  fi
+
+  kill -TERM "$pid"
+  for _ in $(seq 1 50); do
+    if ! is_live_process "$pid"; then
+      rm -f "$PID_FILE"
+      echo "Stopped auth2api (PID $pid)."
+      return 0
+    fi
+    sleep 0.2
+  done
+
+  echo "Error: auth2api (PID $pid) did not stop after SIGTERM." >&2
+  return 1
+}
+
 ensure_server() {
   command -v curl >/dev/null 2>&1 || return 1
 
@@ -317,6 +364,14 @@ case "${1:-}" in
   start)
     shift
     run_foreground "$@"
+    ;;
+  stop)
+    shift
+    if (($#)); then
+      echo "Error: stop does not accept additional arguments." >&2
+      exit 2
+    fi
+    stop_server
     ;;
   -h | --help | help)
     usage

@@ -14,6 +14,8 @@ import {
 import { TokenData, TokenStorage } from "../src/auth/types";
 import { AccountManager, extractUsage } from "../src/accounts/manager";
 import { buildRegistry } from "../src/providers/registry";
+
+delete process.env.GEMINI_API_KEY;
 import { generateCodexAuthURL } from "../src/auth/codex/oauth";
 import { generatePKCECodes } from "../src/auth/pkce";
 import {

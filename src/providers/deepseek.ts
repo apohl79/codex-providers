@@ -57,6 +57,10 @@ export function buildDeepSeekProvider(
         ? ADVERTISED_MODELS.map((id) => ({ id, owned_by: "deepseek" }))
         : [],
     callMessages: (opts: UpstreamCallContext) =>
-      callAnthropicMessagesWithApiKey({ ...opts, baseUrl }),
+      callAnthropicMessagesWithApiKey({
+        ...opts,
+        baseUrl,
+        normalizeToolResultMessages: true,
+      }),
   };
 }

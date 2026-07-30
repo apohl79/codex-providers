@@ -59,6 +59,16 @@ export interface UsageData {
  * Responses shape (input_tokens_details.cached_tokens / …).
  */
 export function extractUsage(resp: any): UsageData {
+  const geminiUsage = resp?.usageMetadata;
+  if (geminiUsage) {
+    return {
+      inputTokens: geminiUsage.promptTokenCount || 0,
+      outputTokens: geminiUsage.candidatesTokenCount || 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: geminiUsage.cachedContentTokenCount || 0,
+      reasoningOutputTokens: geminiUsage.thoughtsTokenCount || 0,
+    };
+  }
   const u = resp?.usage ?? resp?.response?.usage;
   if (!u) {
     return {

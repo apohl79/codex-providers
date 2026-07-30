@@ -10,12 +10,14 @@ const FILENAME_PREFIX: Record<ProviderId, string> = {
   codex: "codex",
   cursor: "cursor",
   deepseek: "deepseek",
+  gemini: "gemini",
 };
 
 function normaliseProvider(type: TokenStorage["type"] | undefined): ProviderId {
   if (type === "cursor") return "cursor";
   if (type === "codex") return "codex";
   if (type === "deepseek") return "deepseek";
+  if (type === "gemini") return "gemini";
   return "anthropic"; // "claude" or missing → anthropic (legacy files)
 }
 
@@ -102,7 +104,8 @@ export function loadAllTokens(
       f.startsWith("claude-") ||
       f.startsWith("codex-") ||
       f.startsWith("cursor-") ||
-      f.startsWith("deepseek-")
+      f.startsWith("deepseek-") ||
+      f.startsWith("gemini-")
     );
   });
   const tokens: TokenData[] = [];

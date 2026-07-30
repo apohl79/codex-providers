@@ -1,6 +1,6 @@
 # auth2api
 
-A lightweight OAuth-to-API proxy that turns your Claude (Anthropic), ChatGPT (OpenAI Codex), DeepSeek API key, and experimental local Cursor login into usable API endpoints for Claude Code and OpenAI-compatible clients.
+A lightweight OAuth-to-API proxy that turns your Claude (Anthropic), ChatGPT (OpenAI Codex), DeepSeek API key, Gemini API key, and experimental local Cursor login into usable API endpoints for Claude Code and OpenAI-compatible clients.
 
 auth2api is intentionally small and focused:
 
@@ -24,17 +24,21 @@ codex -p claude
 # DeepSeek (requires DEEPSEEK_API_KEY)
 ./codex-manager --preset deepseek --yes
 codex -p deepseek
+
+# Gemini (the interactive wizard saves a missing key to auth-dir and writes a proxy-backed Responses profile)
+./codex-manager --preset gemini
+codex -p gemini
 ```
 
 ## Features
 
-- **Codex integration** — `codex-manager` curses wizard writes all Codex config files (`~/.codex/*.config.toml`, model catalogs, agent definitions) for Claude, DeepSeek, and GPT backends. Starts provider login flows automatically. Non-interactive mode available (`--yes`).
+- **Codex integration** — `codex-manager` curses wizard writes all Codex config files (`~/.codex/*.config.toml`, model catalogs, agent definitions) for Claude, DeepSeek, Gemini, and GPT backends. Generated Gemini profiles use auth2api's local Responses endpoint; its setup securely prompts for a missing Gemini API key and saves it in auth-dir. Non-interactive mode available (`--yes`).
 - **Fixed translation layer** — the upstream OpenAI→Anthropic translator didn't handle Codex's wire format correctly: Claude models broke on tool calls and structured output, DeepSeek's Anthropic-compatible endpoint was untested. Both are now working, including streaming, reasoning, tool use, and image passthrough (for providers that support it).
-- **Per-backend system prompts** — `docs/prompts/{gpt,claude,deepseek}.md` load as `base_instructions` in generated model catalogs and agent TOML files. Edit the markdown directly to customize behavior per backend. `--update-models-cache` syncs `gpt.md` into `~/.codex/models_cache.json` and GPT pricing into `config.toml`.
+- **Per-backend system prompts** — `docs/prompts/{gpt,claude,deepseek,gemini}.md` load as `base_instructions` in generated model catalogs and agent TOML files. Edit the markdown directly to customize behavior per backend. `--update-models-cache` syncs `gpt.md` into `~/.codex/models_cache.json` and GPT pricing into `config.toml`.
 - **Codex-optimized prompts** — each prompt is tuned for the apohl79 Codex fork: GPT gets the full collaborative thought-partner style with CommonMark and visualization guidance. Claude gets outcome-first terseness, zero-comment policy, no compat hacks, OWASP security awareness. DeepSeek gets the GPT baseline plus explicit vision-unsupported notice.
-- **Claude & DeepSeek fixes** — current Claude model defaults (`claude-opus-4-8`, `claude-fable-5`, `claude-sonnet-5`, `claude-haiku-4-5`). DeepSeek profiles with correct model config (text-only — DeepSeek's Anthropic API rejects `type: "image"`). Claude Code `[1m]` suffix handling. Responses custom-tool compatibility for freeform tools such as `apply_patch`.
+- **Claude, DeepSeek & Gemini routing** — current Claude model defaults (`claude-opus-4-8`, `claude-fable-5`, `claude-sonnet-5`, `claude-haiku-4-5`). DeepSeek profiles use the text-only configuration required by its Anthropic API. Gemini models use the native GenerateContent API behind auth2api's Responses adapter. Claude Code `[1m]` suffix handling and Responses custom-tool compatibility cover freeform tools such as `apply_patch`.
 - **Lightweight by design** — small codebase, minimal moving parts
-- **Multiple providers, one proxy** — Claude OAuth, OpenAI Codex (ChatGPT) OAuth, DeepSeek API-key authentication, and an experimental Cursor local-login provider coexist; per-provider account pools, cooldown, refresh, and stats
+- **Multiple providers, one proxy** — Claude OAuth or API-key authentication, OpenAI Codex (ChatGPT) OAuth, DeepSeek API-key authentication, Gemini native API-key authentication, and an experimental Cursor local-login provider coexist; per-provider account pools, cooldown, refresh, and stats
 - **Multi-account support** — load multiple OAuth tokens per provider with sticky routing, automatic failover, and per-account usage tracking
 - **OpenAI-compatible API** — supports `/v1/chat/completions`, `/v1/responses`, and `/v1/models`
 - **Claude native passthrough** — supports `/v1/messages` and `/v1/messages/count_tokens`
@@ -61,9 +65,10 @@ npm run build
 
 auth2api supports these upstream providers:
 
-- `anthropic` — Claude OAuth (default). Used for `claude-*` models.
+- `anthropic` — Claude OAuth or direct Anthropic API-key authentication (default). Used for `claude-*` models.
 - `codex` — OpenAI's "Sign in with ChatGPT" OAuth, talking to the official codex backend at `https://chatgpt.com/backend-api/codex/responses`. Used for `gpt-5*` (incl. `gpt-5-codex`), `o\d*`, and `codex-*` models. Requires a **ChatGPT Plus or Pro** subscription — Free accounts authenticate but the first call fails with `model not supported`.
 - `deepseek` — DeepSeek's Anthropic-compatible Messages API, authenticated with an API key from the configured environment variable. Used for `deepseek-v4-pro` and `deepseek-v4-flash`.
+- `gemini` — Gemini's native GenerateContent API, authenticated with an API key from the configured environment variable or a saved auth-dir credential. Used for `gemini-*` models through `/v1/responses`.
 - `cursor` — experimental Cursor account, authorized either through a browser deep-link PKCE flow (default) or by importing the local Cursor desktop login. **Routing**: in multi-provider setups Cursor only serves models with an explicit `cursor-*` or `cr/*` prefix. In **Cursor-exclusive mode** (only Cursor is logged in, no `anthropic`/`codex` accounts), every request — including bare `claude-*` or `gpt-*` model names — is auto-routed through Cursor so off-the-shelf Claude Code / OpenAI clients work without a prefix.
 
 Pick the provider with `--provider=`. Default is `anthropic`.
@@ -74,6 +79,10 @@ Pick the provider with `--provider=`. Default is `anthropic`.
 # Claude (default)
 node dist/index.js --login
 
+# Claude with a direct Anthropic API key
+export ANTHROPIC_API_KEY="<your-anthropic-api-key>"
+node dist/index.js --login --provider=anthropic --auth=api-key
+
 # Codex (ChatGPT Plus/Pro)
 node dist/index.js --login --provider=codex
 
@@ -83,6 +92,12 @@ export DEEPSEEK_API_KEY="<your-deepseek-api-key>"
 # Or save it interactively in auth-dir (default: ~/.auth2api).
 node dist/index.js --login --provider=deepseek
 
+# Gemini can use an environment variable for non-interactive startup.
+export GEMINI_API_KEY="<your-gemini-api-key>"
+
+# Or save it interactively in auth-dir (default: ~/.auth2api).
+node dist/index.js --login --provider=gemini
+
 # Cursor (experimental; opens a browser to authorize your Cursor account)
 node dist/index.js --login --provider=cursor
 
@@ -91,7 +106,9 @@ node dist/index.js --login --provider=cursor --cursor-import-local
 node dist/index.js --login --provider=cursor --cursor-storage=/path/to/state.vscdb
 ```
 
-Anthropic and Codex open a browser URL. After authorizing, the callback is handled automatically. The Anthropic flow uses port `54545`; the Codex flow uses port `1455` — make sure neither is blocked by your firewall. Cursor uses a different "deep-link" PKCE flow: it prints a `https://cursor.com/loginDeepControl?...` URL, you click "Yes, Log In" in your browser, and `auth2api` polls `api2.cursor.sh/auth/poll` until the token is issued — no callback port required. Pass `--cursor-import-local` (or `--cursor-storage=...`) if you'd rather pull the existing token out of your Cursor desktop install.
+Anthropic OAuth and Codex open a browser URL. After authorizing, the callback is handled automatically. The Anthropic OAuth flow uses port `54545`; the Codex flow uses port `1455` — make sure neither is blocked by your firewall. `--login --provider=anthropic --auth=api-key` securely prompts for an Anthropic key when `ANTHROPIC_API_KEY` is unset, then saves it in `auth-dir`; `--login --provider=gemini` does the same for Gemini. Gemini calls use the native `models.generateContent` and `models.streamGenerateContent` APIs, not Google's OpenAI-compatible endpoint. Cursor uses a different "deep-link" PKCE flow: it prints a `https://cursor.com/loginDeepControl?...` URL, you click "Yes, Log In" in your browser, and `auth2api` polls `api2.cursor.sh/auth/poll` until the token is issued — no callback port required. Pass `--cursor-import-local` (or `--cursor-storage=...`) if you'd rather pull the existing token out of your Cursor desktop install.
+
+When the interactive `codex-manager` wizard selects Claude OAuth or an Anthropic API key, it keeps only that persisted Claude authentication method in `auth-dir`; the removed opposite-method files are saved as timestamped `*.bak-codex-manager-*` backups.
 
 ### Manual mode (for remote servers)
 
@@ -102,7 +119,7 @@ node dist/index.js --login --provider=codex --manual
 
 Open the printed URL in your browser. After authorizing, your browser will redirect to a `localhost` URL that fails to load — copy the full URL from the address bar and paste it back into the terminal.
 
-You can run `--login` multiple times to add additional accounts (per provider). auth2api stores tokens side-by-side in `auth-dir` (`claude-<email>.json`, `codex-<email>.json`, and `cursor-<email>.json`) and routes inbound requests to the matching pool by model name. Logging in to only one provider is fine — the others simply have no advertised models.
+You can run `--login` multiple times to add additional accounts (per provider). auth2api stores credentials side-by-side in `auth-dir` (`claude-<email>.json`, `codex-<email>.json`, `deepseek-<email>.json`, `gemini-<email>.json`, and `cursor-<email>.json`) and routes inbound requests to the matching pool by model name. API-key login writes an owner-only credential file; environment API keys remain in memory only. Logging in to only one provider is fine — the others simply have no advertised models.
 
 > **Note on Codex:** The codex provider relays your ChatGPT Plus/Pro subscription quota. OpenAI's ToS does not officially permit relaying ChatGPT sessions through third-party tools — use this for your own personal local consumption only.
 
@@ -123,9 +140,10 @@ The repo includes `install.sh`, which writes an `auth2api` runner script to `~/b
 ```bash
 ./install.sh
 auth2api ensure
+auth2api stop
 ```
 
-`auth2api ensure` checks the configured `/health` endpoint and exits silently if the server is already ready. Otherwise it installs dependencies when needed, builds `dist/index.js` when needed, starts `node dist/index.js --config=<repo>/config.yaml` in the background, and waits for the health endpoint to become ready. Background logs are written to `~/.local/state/auth2api/server.log` by default.
+`auth2api ensure` checks the configured `/health` endpoint and exits silently if the server is already ready. Otherwise it installs dependencies when needed, builds `dist/index.js` when needed, starts `node dist/index.js --config=<repo>/config.yaml` in the background, and waits for the health endpoint to become ready. `auth2api stop` verifies the runner-owned PID before sending `SIGTERM`; use `auth2api stop && auth2api ensure` for a clean restart. Background logs are written to `~/.local/state/auth2api/server.log` by default.
 
 To remove the runner and the managed `~/.zshrc` ensure block:
 
@@ -141,7 +159,7 @@ Copy `config.example.yaml` to `config.yaml` and edit as needed:
 host: "" # bind address, empty = 127.0.0.1
 port: 8317
 
-auth-dir: "~/.auth2api" # where OAuth tokens are stored
+auth-dir: "~/.auth2api" # where provider credentials are stored
 
 deepseek:
   api-key-env: "DEEPSEEK_API_KEY" # environment variable containing the key
@@ -444,7 +462,7 @@ This reads `docs/prompts/gpt.md` and writes its content into `base_instructions`
 
 ## Multi-account
 
-auth2api supports multiple Claude OAuth accounts. Each account is stored as a separate token file in the auth directory.
+auth2api supports multiple Claude OAuth accounts and Anthropic API-key credentials. Each account is stored as a separate credential file in the auth directory.
 
 - Run `--login` once per account to add tokens
 - Requests are routed using sticky selection — the same account is reused until it hits a cooldown

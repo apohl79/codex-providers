@@ -24,6 +24,8 @@ import {
 } from "../src/upstream/cursor-api";
 import { saveToken, loadAllTokens } from "../src/auth/token-storage";
 import { buildRegistry } from "../src/providers/registry";
+
+delete process.env.GEMINI_API_KEY;
 import { Config } from "../src/config";
 import {
   buildCursorLoginUrl,

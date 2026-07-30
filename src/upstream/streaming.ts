@@ -88,6 +88,7 @@ export type SSEEventHandler = (
 
 export interface StreamOptions {
   onEvent?: SSEEventHandler;
+  onComplete?: (usage: UsageData) => string[];
 }
 
 export interface StreamResult {
@@ -97,6 +98,13 @@ export interface StreamResult {
 }
 
 function extractUsageFromSSE(event: string, data: any, usage: UsageData): void {
+  if (data?.usageMetadata) {
+    usage.inputTokens = data.usageMetadata.promptTokenCount || 0;
+    usage.outputTokens = data.usageMetadata.candidatesTokenCount || 0;
+    usage.cacheReadInputTokens = data.usageMetadata.cachedContentTokenCount || 0;
+    usage.reasoningOutputTokens = data.usageMetadata.thoughtsTokenCount || 0;
+    return;
+  }
   // Anthropic Messages stream — usage arrives on message_delta.
   if (event === "message_delta") {
     const u = data?.usage;
@@ -225,6 +233,9 @@ export async function handleStreamingResponse(
   } finally {
     resp.off("close", onClose);
     if (!clientDisconnected) {
+      if (completed && options?.onComplete) {
+        for (const chunk of options.onComplete(usage)) resp.write(chunk);
+      }
       resp.end();
     }
   }

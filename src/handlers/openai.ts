@@ -31,6 +31,13 @@ import {
   makeResponsesToChatState,
   drainCodexResponsesSse,
 } from "../upstream/responses-translator";
+import {
+  completeGeminiResponses,
+  geminiSSEToResponses,
+  geminiToResponses,
+  makeGeminiResponsesState,
+  responsesToGeminiGenerateContent,
+} from "../upstream/gemini-translator";
 
 function openaiErrorBody(status: number, body: string): any {
   try {
@@ -396,6 +403,57 @@ async function proxyCodexResponses(args: {
   });
 }
 
+async function proxyGeminiResponses(args: {
+  req: Request;
+  resp: ExpressResponse;
+  config: Config;
+  provider: ReturnType<ProviderRegistry["forModel"]>;
+  body: any;
+  model: string;
+  stream: boolean;
+}): Promise<void> {
+  const { req, resp, config, provider, body, model, stream } = args;
+  const geminiBody = responsesToGeminiGenerateContent({ ...body, stream });
+
+  await proxyWithRetry("Responses(gemini)", resp, config, {
+    manager: provider.manager,
+    upstream: (account, signal) =>
+      provider.callMessages({
+        body: geminiBody,
+        request: req,
+        account,
+        config,
+        signal,
+      }),
+    success: async (upstream, account) => {
+      if (stream) {
+        const state = makeGeminiResponsesState();
+        const result = await handleStreamingResponse(upstream, resp, {
+          onEvent: (_event, data) => geminiSSEToResponses(data, state, model),
+          onComplete: (usage) => completeGeminiResponses(state, model, usage),
+        });
+        if (result.completed) {
+          provider.manager.recordSuccess(account.token.email, result.usage);
+        } else if (!result.clientDisconnected) {
+          provider.manager.recordFailure(
+            account.token.email,
+            "network",
+            "stream terminated before completion",
+          );
+        }
+        return;
+      }
+
+      const geminiResponse = await upstream.json();
+      const usage = extractUsage(geminiResponse);
+      provider.manager.recordSuccess(account.token.email, usage);
+      tagStatsUsage(resp, usage);
+      resp.json(geminiToResponses(geminiResponse, model));
+    },
+    errorAdapter: openaiErrorBody,
+  });
+}
+
 /**
  * Cursor-specific path for /v1/chat/completions. Cursor's upstream is
  * stream-only, so for `stream:false` we drive the same streaming SSE
@@ -549,6 +607,16 @@ export function createChatCompletionsHandler(
       const provider = registry.forModel(model);
       tagStatsModel(resp, model, provider.id);
 
+      if (provider.id === "gemini") {
+        resp.status(400).json({
+          error: {
+            message: "Gemini currently supports /v1/responses only.",
+            type: "unsupported_endpoint",
+          },
+        });
+        return;
+      }
+
       // Cursor's wire protocol is closer to the OpenAI Responses API than to
       // Anthropic Messages, so for Cursor we skip the OpenAI->Anthropic
       // translation and ask the Cursor provider to emit Chat Completions
@@ -673,6 +741,19 @@ export function createResponsesHandler(
       // `stream:true` upstream regardless, but the client's original
       // intent decides whether we forward SSE or aggregate locally.
       const clientWantsStream = !!body.stream;
+
+      if (provider.nativeFormat === "gemini-generate-content") {
+        await proxyGeminiResponses({
+          req,
+          resp,
+          config,
+          provider,
+          body,
+          model,
+          stream: clientWantsStream,
+        });
+        return;
+      }
 
       if (provider.nativeFormat === "openai-responses") {
         if (provider.id === "codex") {

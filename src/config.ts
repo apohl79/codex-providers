@@ -56,6 +56,11 @@ export interface DeepSeekConfig {
   "base-url": string;
 }
 
+export interface GeminiConfig {
+  "api-key-env": string;
+  "base-url": string;
+}
+
 export type DebugMode = "off" | "errors" | "verbose";
 
 export interface Config {
@@ -70,6 +75,8 @@ export interface Config {
   debug: DebugMode;
   /** Optional so existing test/config callers remain source-compatible. */
   deepseek?: DeepSeekConfig;
+  /** Optional so existing test/config callers remain source-compatible. */
+  gemini?: GeminiConfig;
 }
 
 // Raw config shape from YAML (api-keys is an array, not a Set)
@@ -98,6 +105,10 @@ const DEFAULT_RAW: RawConfig = {
   deepseek: {
     "api-key-env": "DEEPSEEK_API_KEY",
     "base-url": "https://api.deepseek.com/anthropic",
+  },
+  gemini: {
+    "api-key-env": "GEMINI_API_KEY",
+    "base-url": "https://generativelanguage.googleapis.com/v1beta",
   },
   debug: "off",
 };
@@ -149,6 +160,10 @@ export function loadConfig(configPath?: string): Config {
         ...DEFAULT_RAW.deepseek,
         ...(parsed.deepseek || {}),
       } as DeepSeekConfig,
+      gemini: {
+        ...DEFAULT_RAW.gemini,
+        ...(parsed.gemini || {}),
+      } as GeminiConfig,
     };
   }
 

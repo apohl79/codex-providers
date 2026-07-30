@@ -34,6 +34,7 @@ class Auth2ApiConfig:
     auth_dir: str
     api_key: str | None
     deepseek_api_key_env: str
+    gemini_api_key_env: str = "GEMINI_API_KEY"
 
 
 @dataclass(frozen=True)
@@ -109,6 +110,8 @@ def menu_item_parts(item: MenuItem) -> tuple[str, str, bool]:
 
 CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
 DEEPSEEK_FAST_MODEL = "deepseek-v4-flash"
+GEMINI_FAST_MODEL = "gemini-3.6-flash"
+CLAUDE_API_KEY_ACCOUNT_UUID = "anthropic-api-key"
 
 
 BACKENDS = {
@@ -143,6 +146,18 @@ BACKENDS = {
         fallback_models=("deepseek-v4-pro", "deepseek-v4-flash"),
         model_prefixes=("deepseek-v4-",),
     ),
+    "gemini": Backend(
+        key="gemini",
+        label="Gemini",
+        description="Uses your Gemini API key through the local auth2api adapter.",
+        default_context="gemini",
+        default_provider="gemini",
+        context_aliases=("gemini", "local-gemini"),
+        provider_aliases=("gemini", "local-gemini"),
+        display_name="Gemini",
+        fallback_models=("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3-pro-preview"),
+        model_prefixes=("gemini-",),
+    ),
 }
 
 
@@ -161,7 +176,7 @@ def _prompts_dir() -> Path:
 
 def load_prompt(repo_dir: Path, backend_key: str) -> str:
     """Load the prompt markdown file for the given backend."""
-    filename = {"claude": "claude.md", "deepseek": "deepseek.md"}.get(backend_key, "gpt.md")
+    filename = {"claude": "claude.md", "deepseek": "deepseek.md", "gemini": "gemini.md"}.get(backend_key, "gpt.md")
     path = repo_dir / "docs" / "prompts" / filename
     if not path.exists():
         raise FileNotFoundError(f"Prompt file not found: {path}")
@@ -388,8 +403,10 @@ def read_auth2api_config(path: Path) -> Auth2ApiConfig:
     auth_dir = "~/.auth2api"
     api_key: str | None = None
     deepseek_api_key_env = "DEEPSEEK_API_KEY"
+    gemini_api_key_env = "GEMINI_API_KEY"
     in_api_keys = False
     in_deepseek = False
+    in_gemini = False
 
     if not path.exists():
         return Auth2ApiConfig(
@@ -398,6 +415,7 @@ def read_auth2api_config(path: Path) -> Auth2ApiConfig:
             auth_dir=auth_dir,
             api_key=api_key,
             deepseek_api_key_env=deepseek_api_key_env,
+            gemini_api_key_env=gemini_api_key_env,
         )
 
     for raw_line in path.read_text().splitlines():
@@ -407,14 +425,27 @@ def read_auth2api_config(path: Path) -> Auth2ApiConfig:
             continue
         if line == "deepseek:" and indent == 0:
             in_deepseek = True
+            in_gemini = False
+            in_api_keys = False
+            continue
+        if line == "gemini:" and indent == 0:
+            in_gemini = True
+            in_deepseek = False
             in_api_keys = False
             continue
         if in_deepseek and indent == 0:
             in_deepseek = False
+        if in_gemini and indent == 0:
+            in_gemini = False
         if in_deepseek and line.startswith("api-key-env:"):
             parsed = unquote(strip_inline_comment(line.split(":", 1)[1]))
             if parsed:
                 deepseek_api_key_env = parsed
+            continue
+        if in_gemini and line.startswith("api-key-env:"):
+            parsed = unquote(strip_inline_comment(line.split(":", 1)[1]))
+            if parsed:
+                gemini_api_key_env = parsed
             continue
         if line.startswith("api-keys:"):
             parsed_keys = strip_inline_comment(line.split(":", 1)[1]).strip()
@@ -445,6 +476,7 @@ def read_auth2api_config(path: Path) -> Auth2ApiConfig:
         auth_dir=auth_dir,
         api_key=api_key,
         deepseek_api_key_env=deepseek_api_key_env,
+        gemini_api_key_env=gemini_api_key_env,
     )
 
 
@@ -463,53 +495,96 @@ def resolve_auth_dir(value: str, repo_dir: Path) -> Path:
 
 
 def has_claude_login(auth_dir: Path) -> bool:
-    return any(auth_dir.glob("claude-*.json"))
+    return any(auth_dir.glob("claude-*.json")) or bool(
+        os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    )
+
+
+def claude_credential_method(path: Path) -> str | None:
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    account_uuid = payload.get("account_uuid")
+    if not isinstance(account_uuid, str):
+        return None
+    return "api-key" if account_uuid == CLAUDE_API_KEY_ACCOUNT_UUID else "oauth"
+
+
+def has_claude_credential_method(auth_dir: Path, auth_method: str) -> bool:
+    return any(
+        claude_credential_method(path) == auth_method
+        for path in auth_dir.glob("claude-*.json")
+    )
+
+
+def remove_opposite_claude_credentials(auth_dir: Path, auth_method: str) -> tuple[Path, ...]:
+    if auth_method not in ("oauth", "api-key"):
+        raise ValueError(f"Unsupported Claude authentication method: {auth_method}")
+    backups = []
+    for path in auth_dir.glob("claude-*.json"):
+        credential_method = claude_credential_method(path)
+        if credential_method is None or credential_method == auth_method:
+            continue
+        backup_path = backup(path)
+        if backup_path is not None:
+            path.unlink()
+            backups.append(backup_path)
+    return tuple(backups)
+
+
+def run_selected_claude_login(
+    auth_method: str,
+    auth_dir: Path,
+    repo_dir: Path,
+    auth2api_config_path: Path,
+    manual_login: bool,
+) -> tuple[Path, ...]:
+    if auth_method == "api-key":
+        run_claude_api_key_login(repo_dir, auth2api_config_path)
+    elif auth_method == "oauth":
+        run_claude_login(repo_dir, auth2api_config_path, manual_login)
+    else:
+        raise ValueError(f"Unsupported Claude authentication method: {auth_method}")
+    if not has_claude_credential_method(auth_dir, auth_method):
+        raise SystemExit(
+            f"Error: Claude {auth_method} login completed but no matching credential was found in auth-dir."
+        )
+    backups = remove_opposite_claude_credentials(auth_dir, auth_method)
+    if backups:
+        print(f"Removed {len(backups)} Claude credential(s) for the non-selected authentication method.")
+    return backups
 
 
 def has_deepseek_login(auth_dir: Path, api_key_env: str) -> bool:
     return any(auth_dir.glob("deepseek-*.json")) or bool(os.environ.get(api_key_env, "").strip())
 
 
+def has_gemini_login(auth_dir: Path, api_key_env: str) -> bool:
+    return any(auth_dir.glob("gemini-*.json")) or bool(os.environ.get(api_key_env, "").strip())
+
 def provider_has_configuration(
     backend: Backend,
-    auth_dir: Path,
-    api_key_env: str,
     codex_home: Path,
     codex_config: Path,
 ) -> bool:
-    if backend.key == "deepseek":
-        has_credential = has_deepseek_login(auth_dir, api_key_env)
-    else:
-        has_credential = has_claude_login(auth_dir)
-    if has_credential:
-        return True
-
-    if any(
+    return any(
         context.provider_id in backend.provider_aliases
         or context.name in backend.context_aliases
         for context in discover_contexts(codex_home)
-    ):
-        return True
-    return backend.default_provider in parse_providers(codex_config)
+    ) or backend.default_provider in parse_providers(codex_config)
 
 
 def configured_backends(
-    auth_config: Auth2ApiConfig,
     codex_home: Path,
     codex_config: Path,
-    repo_dir: Path,
 ) -> set[str]:
-    auth_dir = resolve_auth_dir(auth_config.auth_dir, repo_dir)
     return {
         backend.key
         for backend in BACKENDS.values()
-        if provider_has_configuration(
-            backend,
-            auth_dir,
-            auth_config.deepseek_api_key_env,
-            codex_home,
-            codex_config,
-        )
+        if provider_has_configuration(backend, codex_home, codex_config)
     }
 
 
@@ -556,7 +631,13 @@ def ensure_node_dependencies(repo_dir: Path) -> None:
         subprocess.run(["npm", "install"], cwd=repo_dir, check=True)
 
 
-def run_provider_login(repo_dir: Path, config_path: Path, provider_id: str, manual: bool) -> None:
+def run_provider_login(
+    repo_dir: Path,
+    config_path: Path,
+    provider_id: str,
+    manual: bool,
+    auth_method: str | None = None,
+) -> None:
     script = repo_dir / "dist" / "index.js"
     ensure_node_dependencies(repo_dir)
     if not script.exists():
@@ -568,6 +649,8 @@ def run_provider_login(repo_dir: Path, config_path: Path, provider_id: str, manu
         "--login",
         f"--provider={provider_id}",
     ]
+    if auth_method:
+        command.append(f"--auth={auth_method}")
     if manual:
         command.append("--manual")
     subprocess.run(command, cwd=repo_dir, check=True)
@@ -577,8 +660,16 @@ def run_claude_login(repo_dir: Path, config_path: Path, manual: bool) -> None:
     run_provider_login(repo_dir, config_path, "anthropic", manual)
 
 
+def run_claude_api_key_login(repo_dir: Path, config_path: Path) -> None:
+    run_provider_login(repo_dir, config_path, "anthropic", False, "api-key")
+
+
 def run_deepseek_login(repo_dir: Path, config_path: Path) -> None:
     run_provider_login(repo_dir, config_path, "deepseek", False)
+
+
+def run_gemini_login(repo_dir: Path, config_path: Path) -> None:
+    run_provider_login(repo_dir, config_path, "gemini", False)
 
 
 def read_toml(path: Path) -> dict:
@@ -789,7 +880,7 @@ def adapt_catalog_value(value: object, backend: Backend, slug: str) -> object:
 
 
 def with_replacement_prompt(entry: dict, backend: Backend, slug: str) -> dict:
-    if backend.key not in ("claude", "deepseek"):
+    if backend.key not in ("claude", "deepseek", "gemini"):
         return entry
     prompt_path = _prompts_dir() / f"{backend.key}.md"
     if prompt_path.exists():
@@ -871,7 +962,7 @@ def with_catalog_schema(entry: dict, backend: Backend) -> dict:
         "supports_parallel_tool_calls": False,
         "supports_image_detail_original": backend.key != "deepseek",
         "experimental_supported_tools": [],
-        "input_modalities": ["text"] if backend.key == "deepseek" else ["text", "image"],
+        "input_modalities": ["text"] if backend.key in ("deepseek", "gemini") else ["text", "image"],
         "include_skills_usage_instructions": False,
         "default_reasoning_summary": "none",
         "additional_speed_tiers": [],
@@ -965,7 +1056,11 @@ def model_matches_backend(model: str, backend: Backend) -> bool:
 
 
 def fast_model_for_backend(backend: Backend) -> str:
-    return DEEPSEEK_FAST_MODEL if backend.key == "deepseek" else CLAUDE_FAST_MODEL
+    if backend.key == "deepseek":
+        return DEEPSEEK_FAST_MODEL
+    if backend.key == "gemini":
+        return GEMINI_FAST_MODEL
+    return CLAUDE_FAST_MODEL
 
 
 def filter_models(models: list[str], backend: Backend) -> list[str]:
@@ -979,7 +1074,11 @@ def filter_models(models: list[str], backend: Backend) -> list[str]:
     return result
 
 
-def fetch_models(base_url: str, api_key: str | None, backend: Backend) -> tuple[list[str], str]:
+def fetch_models(
+    base_url: str,
+    api_key: str | None,
+    backend: Backend,
+) -> tuple[list[str], str]:
     url = f"{base_url.rstrip('/')}/models"
     request = urllib.request.Request(url)
     if api_key:
@@ -988,7 +1087,7 @@ def fetch_models(base_url: str, api_key: str | None, backend: Backend) -> tuple[
     try:
         with urllib.request.urlopen(request, timeout=2) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as error:
         return list(backend.fallback_models), f"Using fallback models; /v1/models was unavailable ({error})."
 
     data = payload.get("data", [])
@@ -1041,6 +1140,8 @@ def _model_prices_toml(draft: Draft) -> str:
         entries = _claude_model_prices()
     elif backend_key == "deepseek":
         entries = _deepseek_model_prices()
+    elif backend_key == "gemini":
+        entries = _gemini_model_prices()
     else:
         return ""
 
@@ -1088,6 +1189,19 @@ def _deepseek_model_prices() -> dict:
         "deepseek-v4-flash": {"input": 0.14, "cached_input": 0.0028, "output": 0.28},
     }
 
+
+def _gemini_model_prices() -> dict:
+    """Return dict of model_id -> {input, cached_input, output} in USD per 1M tokens.
+
+    Source: https://ai.google.dev/pricing (≤128K context tier for Flash; ≤200K for Pro).
+    Pricing may change — verify at the source.
+    """
+    return {
+        "gemini-3.6-flash": {"input": 0.15, "cached_input": 0.015, "output": 0.60},
+        "gemini-3.5-flash": {"input": 0.15, "cached_input": 0.015, "output": 0.60},
+        "gemini-3.1-pro-preview": {"input": 1.25, "cached_input": 0.125, "output": 5.00},
+        "gemini-3-pro-preview": {"input": 1.25, "cached_input": 0.125, "output": 5.00},
+    }
 
 def _openai_model_prices() -> dict:
     """Return dict of model_id -> {input, cached_input, output, long_input, long_cached_input, long_output} in USD per 1M tokens.
@@ -1580,17 +1694,69 @@ def choose_missing_login_action(auth_dir: Path, backend: Backend = BACKENDS["cla
     return curses.wrapper(run)
 
 
+def choose_claude_login_action(
+    auth_dir: Path,
+    has_existing_credential: bool = False,
+) -> str:
+    def run(stdscr: curses.window) -> str:
+        ui = CursesUi(stdscr)
+        subtitle = (
+            f"Claude credentials were found in {auth_dir}. Choose the authentication to use."
+            if has_existing_credential
+            else f"No Claude credential was found in {auth_dir}. Choose an authentication method."
+        )
+        retain_label = (
+            "Keep existing authentication"
+            if has_existing_credential
+            else "Configure Codex only"
+        )
+        retain_description = (
+            "Keep the existing Claude credentials and continue managing Codex config."
+            if has_existing_credential
+            else "Write Codex config now. Requests will fail until a Claude credential is added."
+        )
+        oauth_item = (
+            "Sign in with Claude",
+            "Open the Claude OAuth browser flow, then store and reload the credential.",
+        )
+        api_key_item = (
+            "Use an Anthropic API key",
+            "Prompt securely for ANTHROPIC_API_KEY, then store and reload the credential.",
+        )
+        retain_item = (retain_label, retain_description)
+        auth_items = (
+            [retain_item, oauth_item, api_key_item]
+            if has_existing_credential
+            else [oauth_item, api_key_item, retain_item]
+        )
+        choice = ui.menu(
+            "Claude Login",
+            subtitle,
+            [*auth_items, ("Abort", "Exit without changing Codex config.")],
+            0,
+        )
+        actions = (
+            ("keep", "oauth", "api-key", "abort")
+            if has_existing_credential
+            else ("oauth", "api-key", "configure", "abort")
+        )
+        return actions[choice]
+
+    return curses.wrapper(run)
+
+
 def choose_provider_action(ui: CursesUi, configured: set[str]) -> tuple[str, str] | None:
     can_add = len(configured) < len(BACKENDS)
     can_manage = bool(configured)
     repo_dir = Path(__file__).resolve().parent
+    backend_labels = ", ".join(backend.label for backend in BACKENDS.values())
     action = ui.menu(
         "Provider Manager",
         "Add a provider or manage an existing Codex profile.",
         [
             (
                 "Add new provider",
-                "Choose Claude or DeepSeek, then sign in and configure models.",
+                f"Choose {backend_labels}, then sign in and configure models.",
                 can_add,
             ),
             (
@@ -1643,17 +1809,58 @@ def ensure_backend_login(
     auth_config: Auth2ApiConfig,
     interactive_tty: bool,
     backend: Backend,
+    prompt_for_claude_auth: bool = False,
 ) -> None:
     if args.skip_login_check:
         return
 
     auth_dir = resolve_auth_dir(auth_config.auth_dir, repo_dir)
+    if backend.key == "gemini":
+        if has_gemini_login(auth_dir, auth_config.gemini_api_key_env):
+            return
+        if args.dry_run:
+            print(f"Would run Gemini login: no gemini-*.json credential exists in {auth_dir}")
+            return
+        if not interactive_tty:
+            raise SystemExit(
+                f"Error: no Gemini credential found in {auth_dir}. Run codex-manager from a terminal, set {auth_config.gemini_api_key_env}, or pass --skip-login-check."
+            )
+        print(f"No Gemini credential found in {auth_dir}. Enter a Gemini API key to configure auth2api.")
+        run_gemini_login(repo_dir, auth2api_config_path)
+        if not has_gemini_login(auth_dir, auth_config.gemini_api_key_env):
+            raise SystemExit(f"Error: Gemini login completed but no credential was found in {auth_dir}.")
+        return
+
     if backend.key == "deepseek":
         has_login = has_deepseek_login(auth_dir, auth_config.deepseek_api_key_env)
         credential_pattern = "deepseek-*.json"
+        credential_env = auth_config.deepseek_api_key_env
     else:
         has_login = has_claude_login(auth_dir)
         credential_pattern = "claude-*.json"
+        credential_env = "ANTHROPIC_API_KEY"
+    if (
+        backend.key == "claude"
+        and prompt_for_claude_auth
+        and interactive_tty
+        and not args.yes
+    ):
+        if args.dry_run:
+            print(f"Would choose Claude authentication for managed provider in {auth_dir}")
+            return
+        choice = choose_claude_login_action(auth_dir, has_login)
+        if choice in ("keep", "configure"):
+            return
+        if choice == "abort":
+            raise KeyboardInterrupt
+        run_selected_claude_login(
+            choice,
+            auth_dir,
+            repo_dir,
+            auth2api_config_path,
+            args.manual_login,
+        )
+        return
     if has_login:
         return
 
@@ -1664,7 +1871,7 @@ def ensure_backend_login(
     if args.yes:
         if not interactive_tty:
             raise SystemExit(
-                f"Error: no {backend.label} credential found in {auth_dir}. Run codex-manager from a terminal, set {auth_config.deepseek_api_key_env} for DeepSeek, or pass --skip-login-check."
+                f"Error: no {backend.label} credential found in {auth_dir}. Run codex-manager from a terminal, set {credential_env}, or pass --skip-login-check."
             )
         print(f"No {backend.label} credential found in {auth_dir}. Starting {backend.label} login.")
         if backend.key == "deepseek":
@@ -1672,18 +1879,29 @@ def ensure_backend_login(
         else:
             run_claude_login(repo_dir, auth2api_config_path, args.manual_login)
     elif interactive_tty:
-        choice = choose_missing_login_action(auth_dir, backend)
-        if choice == 1:
-            return
-        if choice == 2:
-            raise KeyboardInterrupt
         if backend.key == "deepseek":
+            choice = choose_missing_login_action(auth_dir, backend)
+            if choice == 1:
+                return
+            if choice == 2:
+                raise KeyboardInterrupt
             run_deepseek_login(repo_dir, auth2api_config_path)
         else:
-            run_claude_login(repo_dir, auth2api_config_path, args.manual_login)
+            choice = choose_claude_login_action(auth_dir)
+            if choice == "configure":
+                return
+            if choice == "abort":
+                raise KeyboardInterrupt
+            run_selected_claude_login(
+                choice,
+                auth_dir,
+                repo_dir,
+                auth2api_config_path,
+                args.manual_login,
+            )
     else:
         raise SystemExit(
-            f"Error: no {backend.label} credential found in {auth_dir}. Run codex-manager from a terminal, set {auth_config.deepseek_api_key_env} for DeepSeek, or pass --skip-login-check."
+            f"Error: no {backend.label} credential found in {auth_dir}. Run codex-manager from a terminal, set {credential_env}, or pass --skip-login-check."
         )
 
     if backend.key == "deepseek":
@@ -1770,7 +1988,11 @@ def choose_draft(
     source_catalog = load_catalog(catalog_source_context.catalog_path if catalog_source_context else None)
     base_url = normalize_base_url(default_base_url(auth_config))
 
-    models, model_source = fetch_models(base_url, auth_config.api_key, backend)
+    models, model_source = fetch_models(
+        base_url,
+        auth_config.api_key,
+        backend,
+    )
     seed_context = existing or source_context
     if seed_context and seed_context.model:
         seed_model = canonical_model(seed_context.model)
@@ -1905,7 +2127,11 @@ def noninteractive_draft(
     backend = BACKENDS[preset]
     auth_config = read_auth2api_config(auth2api_config_path)
     base_url = normalize_base_url(default_base_url(auth_config))
-    models, _ = fetch_models(base_url, auth_config.api_key, backend)
+    models, _ = fetch_models(
+        base_url,
+        auth_config.api_key,
+        backend,
+    )
     if args.models:
         selected_models = tuple(normalize_models(tuple(item.strip() for item in args.models.split(",") if item.strip())))
     else:
@@ -2083,9 +2309,10 @@ def main() -> int:
     interactive_tty = sys.stdin.isatty() and sys.stdout.isatty()
     auth_config = read_auth2api_config(auth2api_config)
     selected_provider = args.preset
+    provider_action: str | None = None
     try:
         if interactive_tty and not args.preset_explicit and not args.yes:
-            configured = configured_backends(auth_config, codex_home, codex_config, repo_dir)
+            configured = configured_backends(codex_home, codex_config)
 
             def choose_provider(stdscr: curses.window) -> tuple[str, str] | None:
                 return choose_provider_action(CursesUi(stdscr), configured)
@@ -2097,18 +2324,23 @@ def main() -> int:
             if selection == "update-gpt":
                 print("GPT system prompt synced to models_cache.json, pricing synced to config.toml.")
                 return 0
-            _, selected_provider = selection
+            provider_action, selected_provider = selection
             args.preset = selected_provider
             if not source_context_explicit:
                 args.source_context = str(codex_home / f"{BACKENDS[selected_provider].default_context}.config.toml")
 
+        backend = BACKENDS[selected_provider]
+        prompt_for_claude_auth = (
+            backend.key == "claude" and provider_action == "manage"
+        )
         ensure_backend_login(
             args,
             repo_dir,
             auth2api_config,
             auth_config,
             interactive_tty,
-            BACKENDS[selected_provider],
+            backend,
+            prompt_for_claude_auth,
         )
     except KeyboardInterrupt:
         print("Aborted.")

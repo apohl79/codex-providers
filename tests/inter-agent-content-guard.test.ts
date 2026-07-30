@@ -11,6 +11,8 @@ import { createServer as createAuth2ApiServer } from "../src/server";
 import { saveToken } from "../src/auth/token-storage";
 import { TokenData } from "../src/auth/types";
 import { buildRegistry } from "../src/providers/registry";
+
+delete process.env.GEMINI_API_KEY;
 import { ProviderRegistry } from "../src/providers/registry";
 import {
   isFernetToken,

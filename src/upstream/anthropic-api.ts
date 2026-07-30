@@ -184,6 +184,34 @@ function extractPassthroughHeaders(
   return passthrough;
 }
 
+function buildApiKeyHeaders(
+  stream: boolean,
+  includeBetaHeaders: boolean,
+  extraHeaders?: Record<string, string>,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: stream ? "text/event-stream" : "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+
+  if (extraHeaders) Object.assign(headers, extraHeaders);
+  if (!includeBetaHeaders) return headers;
+
+  const requestedBetas =
+    typeof headers["anthropic-beta"] === "string"
+      ? headers["anthropic-beta"].split(",")
+      : [];
+  const betas = requestedBetas
+    .map((beta) => beta.trim())
+    .filter((beta) => beta && beta !== OAUTH_BETA);
+  if (betas.length > 0)
+    headers["anthropic-beta"] = [...new Set(betas)].join(",");
+  else delete headers["anthropic-beta"];
+
+  return headers;
+}
+
 export interface CallMessagesOptions {
   body?: any;
   request: Request;
@@ -265,15 +293,32 @@ export async function callAnthropicMessages(
  * Call an Anthropic-compatible upstream with a static API key.
  *
  * This deliberately does not reuse the Claude OAuth header builder above:
- * DeepSeek accepts the Anthropic Messages shape, but its compatibility layer
- * ignores Anthropic beta headers and authenticates with x-api-key.
+ * static-key upstreams authenticate with x-api-key. Anthropic direct API
+ * requests can retain supported beta headers, while DeepSeek opts out.
  */
 export async function callAnthropicMessagesWithApiKey(
-  options: CallMessagesOptions & { baseUrl: string },
+  options: CallMessagesOptions & {
+    baseUrl: string;
+    resolveModelId?: boolean;
+    includeBetaHeaders?: boolean;
+    normalizeToolResultMessages?: boolean;
+  },
 ): Promise<Response> {
   const { request, account, config, baseUrl } = options;
   const body = options.body ?? request.body;
-  const upstreamBody = normalizeDeepSeekToolResultMessages(body);
+  const rawModel = body.model;
+  const model = options.resolveModelId
+    ? resolveModel(rawModel || "claude-sonnet-5")
+    : typeof rawModel === "string"
+      ? rawModel
+      : "claude-sonnet-5";
+  const resolvedBody =
+    options.resolveModelId && typeof rawModel === "string" && rawModel !== model
+      ? { ...body, model }
+      : body;
+  const upstreamBody = options.normalizeToolResultMessages
+    ? normalizeDeepSeekToolResultMessages(resolvedBody)
+    : resolvedBody;
   const stream = !!body.stream;
   const timeoutMs = stream
     ? config.timeouts["stream-messages-ms"]
@@ -283,9 +328,11 @@ export async function callAnthropicMessagesWithApiKey(
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      Accept: stream ? "text/event-stream" : "application/json",
-      "anthropic-version": "2023-06-01",
+      ...buildApiKeyHeaders(
+        stream,
+        !!options.includeBetaHeaders,
+        extractPassthroughHeaders(request.headers),
+      ),
       "x-api-key": account.token.accessToken,
     },
     body: JSON.stringify(upstreamBody),
@@ -328,6 +375,37 @@ export async function callAnthropicCountTokens(
   const response = await fetch(url, {
     method: "POST",
     headers: newHeaders,
+    body: JSON.stringify(upstreamBody),
+    signal: withTimeoutSignal(timeoutMs, options.signal),
+  });
+
+  return response;
+}
+
+export async function callAnthropicCountTokensWithApiKey(
+  options: CallCountTokensOptions & { baseUrl: string },
+): Promise<Response> {
+  const { request, account, config, baseUrl } = options;
+  const body = request.body ?? {};
+  const rawModel = body.model;
+  const model = resolveModel(rawModel || "claude-sonnet-5");
+  const upstreamBody =
+    typeof rawModel === "string" && rawModel !== model
+      ? { ...body, model }
+      : body;
+  const url = `${baseUrl.replace(/\/$/, "")}/v1/messages/count_tokens`;
+  const timeoutMs = config.timeouts["count-tokens-ms"];
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      ...buildApiKeyHeaders(
+        false,
+        true,
+        extractPassthroughHeaders(request.headers),
+      ),
+      "x-api-key": account.token.accessToken,
+    },
     body: JSON.stringify(upstreamBody),
     signal: withTimeoutSignal(timeoutMs, options.signal),
   });

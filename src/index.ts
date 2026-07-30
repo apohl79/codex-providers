@@ -8,6 +8,8 @@ import { importCursorTokenFromLocalStorage } from "./auth/cursor/storage";
 import { runCursorBrowserLogin } from "./auth/cursor/browser-oauth";
 import { buildRegistry, ProviderRegistry } from "./providers/registry";
 import { makeDeepSeekApiKeyToken } from "./providers/deepseek";
+import { makeAnthropicApiKeyToken } from "./providers/anthropic";
+import { makeGeminiApiKeyToken } from "./providers/gemini";
 import { createServer } from "./server";
 import { notifyServerReload } from "./utils/notify-reload";
 import { StatsRecorder } from "./stats/recorder";
@@ -25,11 +27,15 @@ function prompt(question: string): Promise<string> {
   });
 }
 
-function promptSecret(question: string): Promise<string> {
+function promptSecret(
+  question: string,
+  providerName: string,
+  apiKeyEnv: string,
+): Promise<string> {
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
     return Promise.reject(
       new Error(
-        "DeepSeek API-key login requires an interactive terminal; set DEEPSEEK_API_KEY for non-interactive use",
+        `${providerName} API-key login requires an interactive terminal; set ${apiKeyEnv} for non-interactive use`,
       ),
     );
   }
@@ -51,7 +57,7 @@ function promptSecret(question: string): Promise<string> {
         if (character === "\u0003") {
           cleanup();
           stdout.write("\n");
-          reject(new Error("DeepSeek API-key login cancelled"));
+          reject(new Error(`${providerName} API-key login cancelled`));
           return;
         }
         if (character === "\r" || character === "\n") {
@@ -75,6 +81,14 @@ function promptSecret(question: string): Promise<string> {
   });
 }
 
+function parseAuthMethod(args: string[]): "oauth" | "api-key" {
+  const flag = args.find((a) => a.startsWith("--auth="));
+  if (!flag) return "oauth";
+  const value = flag.split("=", 2)[1];
+  if (value === "oauth" || value === "api-key") return value;
+  throw new Error('Unknown auth method. Supported: "oauth", "api-key"');
+}
+
 function parseProviderArg(args: string[]): ProviderId {
   const flag = args.find((a) => a.startsWith("--provider="));
   if (!flag) return "anthropic";
@@ -83,11 +97,12 @@ function parseProviderArg(args: string[]): ProviderId {
     value === "anthropic" ||
     value === "codex" ||
     value === "cursor" ||
-    value === "deepseek"
+    value === "deepseek" ||
+    value === "gemini"
   )
     return value;
   throw new Error(
-    `Unknown provider "${value}". Supported: anthropic, codex, cursor, deepseek`,
+    `Unknown provider "${value}". Supported: anthropic, codex, cursor, deepseek, gemini`,
   );
 }
 
@@ -141,13 +156,47 @@ async function deepSeekLogin(
   const apiKeyEnv = config.deepseek?.["api-key-env"] || "DEEPSEEK_API_KEY";
   const apiKey =
     process.env[apiKeyEnv]?.trim() ||
-    (await promptSecret("DeepSeek API key: ")).trim();
+    (await promptSecret("DeepSeek API key: ", "DeepSeek", apiKeyEnv)).trim();
   if (!apiKey) throw new Error("DeepSeek API key cannot be empty");
 
   registry
     .get("deepseek")
     .manager.addAccount(makeDeepSeekApiKeyToken(apiKey, apiKeyEnv));
   console.log("\nDeepSeek API key saved to auth-dir.");
+  await notifyServerReload(config);
+}
+
+async function geminiLogin(
+  config: Config,
+  registry: ProviderRegistry,
+): Promise<void> {
+  const apiKeyEnv = config.gemini?.["api-key-env"] || "GEMINI_API_KEY";
+  const apiKey =
+    process.env[apiKeyEnv]?.trim() ||
+    (await promptSecret("Gemini API key: ", "Gemini", apiKeyEnv)).trim();
+  if (!apiKey) throw new Error("Gemini API key cannot be empty");
+
+  registry
+    .get("gemini")
+    .manager.addAccount(makeGeminiApiKeyToken(apiKey, apiKeyEnv));
+  console.log("\nGemini API key saved to auth-dir.");
+  await notifyServerReload(config);
+}
+
+async function anthropicApiKeyLogin(
+  config: Config,
+  registry: ProviderRegistry,
+): Promise<void> {
+  const apiKeyEnv = "ANTHROPIC_API_KEY";
+  const apiKey =
+    process.env[apiKeyEnv]?.trim() ||
+    (await promptSecret("Anthropic API key: ", "Anthropic", apiKeyEnv)).trim();
+  if (!apiKey) throw new Error("Anthropic API key cannot be empty");
+
+  registry
+    .get("anthropic")
+    .manager.addAccount(makeAnthropicApiKeyToken(apiKey, apiKeyEnv));
+  console.log("\nAnthropic API key saved to auth-dir.");
   await notifyServerReload(config);
 }
 
@@ -160,7 +209,10 @@ async function doLogin(
   const provider = registry.get(providerId);
 
   if (!provider.oauth || !provider.buildAuthUrl || !provider.exchangeCode) {
-    const apiKeyEnv = config.deepseek?.["api-key-env"] || "DEEPSEEK_API_KEY";
+    const apiKeyEnv =
+      providerId === "gemini"
+        ? config.gemini?.["api-key-env"] || "GEMINI_API_KEY"
+        : config.deepseek?.["api-key-env"] || "DEEPSEEK_API_KEY";
     throw new Error(
       `Provider "${providerId}" uses API-key authentication; set ${apiKeyEnv} instead of using --login`,
     );
@@ -229,7 +281,7 @@ async function startServer(): Promise<void> {
   const config = loadConfig(configPath);
   const authDir = resolveAuthDir(config["auth-dir"]);
 
-  const registry = buildRegistry(authDir, config.deepseek);
+  const registry = buildRegistry(authDir, config.deepseek, config.gemini);
   for (const p of registry.all()) p.manager.load();
 
   const totalAccounts = registry
@@ -296,10 +348,11 @@ async function main(): Promise<void> {
   if (args.includes("--login")) {
     const manual = args.includes("--manual");
     const providerId = parseProviderArg(args);
+    const authMethod = parseAuthMethod(args);
     const cursorStorage = args
       .find((a) => a.startsWith("--cursor-storage="))
       ?.split("=", 2)[1];
-    const registry = buildRegistry(authDir, config.deepseek);
+    const registry = buildRegistry(authDir, config.deepseek, config.gemini);
     for (const p of registry.all()) p.manager.load();
     if (providerId === "cursor") {
       if (cursorStorage || args.includes("--cursor-import-local")) {
@@ -309,6 +362,10 @@ async function main(): Promise<void> {
       }
     } else if (providerId === "deepseek") {
       await deepSeekLogin(config, registry);
+    } else if (providerId === "gemini") {
+      await geminiLogin(config, registry);
+    } else if (providerId === "anthropic" && authMethod === "api-key") {
+      await anthropicApiKeyLogin(config, registry);
     } else {
       await doLogin(config, registry, providerId, manual);
     }

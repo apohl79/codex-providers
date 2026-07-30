@@ -14,6 +14,9 @@ import { saveToken } from "../src/auth/token-storage";
 import { TokenData } from "../src/auth/types";
 import { buildRegistry, ProviderRegistry } from "../src/providers/registry";
 import { refreshTokensWithRetry } from "../src/auth/oauth";
+import { makeGeminiApiKeyToken } from "../src/providers/gemini";
+
+delete process.env.GEMINI_API_KEY;
 
 const TOKEN_URL = "https://api.anthropic.com/v1/oauth/token";
 
@@ -88,7 +91,11 @@ async function startApp(
 async function startAppWithLoadedRegistry(
   config: Config,
 ): Promise<http.Server> {
-  const registry = buildRegistry(config["auth-dir"], config.deepseek);
+  const registry = buildRegistry(
+    config["auth-dir"],
+    config.deepseek,
+    config.gemini,
+  );
   for (const provider of registry.all()) provider.manager.load();
   const app = createServer(config, registry);
   const server = createHttpServer(app);
@@ -470,6 +477,105 @@ test("proxies DeepSeek models through the Anthropic API-key endpoint", async (t)
     fs.readdirSync(authDir).some((name) => name.startsWith("deepseek-")),
     false,
   );
+});
+
+test("proxies Gemini Responses requests through the native GenerateContent API", async (t) => {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-gemini-"));
+  saveToken(authDir, makeGeminiApiKeyToken("gemini-test-key"));
+  const fetchedUrls: string[] = [];
+  const restoreFetch = withMockedFetch(async (input, init) => {
+    const url = String(input);
+    fetchedUrls.push(url);
+    const headers = init?.headers as Record<string, string>;
+    const body = JSON.parse(String(init?.body));
+    assert.equal(headers["x-goog-api-key"], "gemini-test-key");
+    assert.equal(headers.Authorization, undefined);
+    assert.equal(body.model, undefined);
+    assert.deepEqual(body.systemInstruction, {
+      parts: [{ text: "Use concise answers." }],
+    });
+    assert.deepEqual(body.contents, [
+      { role: "user", parts: [{ text: "Say hello" }] },
+    ]);
+
+    if (url.includes(":streamGenerateContent?alt=sse")) {
+      return new Response(
+        'data: {"candidates":[{"content":{"parts":[{"text":"hello "}]}}]}\n\ndata: {"candidates":[{"content":{"parts":[{"text":"world"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}\n\n',
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: { parts: [{ text: "hello from gemini" }] },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 6 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  const server = await startAppWithLoadedRegistry(makeConfig(authDir));
+
+  t.after(async () => {
+    restoreFetch();
+    await stopApp(server);
+    fs.rmSync(authDir, { recursive: true, force: true });
+  });
+
+  const models = await requestJson({
+    server,
+    method: "GET",
+    path: "/v1/models",
+    headers: { Authorization: "Bearer test-key" },
+  });
+  assert.equal(models.status, 200);
+  assert.ok(
+    models.body.data.some(
+      (model: { id: string }) => model.id === "gemini-3.6-flash",
+    ),
+  );
+
+  const nonStream = await requestJson({
+    server,
+    method: "POST",
+    path: "/v1/responses",
+    headers: { Authorization: "Bearer test-key" },
+    body: {
+      model: "gemini-3.6-flash",
+      instructions: "Use concise answers.",
+      input: [{ role: "user", content: "Say hello" }],
+    },
+  });
+  assert.equal(nonStream.status, 200);
+  assert.equal(nonStream.body.output[0].content[0].text, "hello from gemini");
+  assert.equal(nonStream.body.usage.total_tokens, 10);
+
+  const stream = await requestText({
+    server,
+    method: "POST",
+    path: "/v1/responses",
+    headers: { Authorization: "Bearer test-key" },
+    body: {
+      model: "gemini-3.6-flash",
+      instructions: "Use concise answers.",
+      input: [{ role: "user", content: "Say hello" }],
+      stream: true,
+    },
+  });
+  assert.equal(stream.status, 200);
+  assert.match(stream.body, /event: response\.output_text\.delta/);
+  assert.match(stream.body, /"delta":"hello "/);
+  assert.match(stream.body, /"delta":"world"/);
+  assert.match(stream.body, /event: response\.completed/);
+  assert.match(stream.body, /"total_tokens":5/);
+  assert.deepEqual(fetchedUrls, [
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?alt=sse",
+  ]);
 });
 
 test("refreshes the OAuth token after an upstream 401 and retries successfully", async (t) => {

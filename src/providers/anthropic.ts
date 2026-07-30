@@ -1,4 +1,5 @@
 import { PKCECodes, TokenData } from "../auth/types";
+import { loadAllTokens } from "../auth/token-storage";
 import {
   generateAuthURL,
   exchangeCodeForTokens,
@@ -7,7 +8,9 @@ import {
 import { AccountManager } from "../accounts/manager";
 import {
   callAnthropicMessages,
+  callAnthropicMessagesWithApiKey,
   callAnthropicCountTokens,
+  callAnthropicCountTokensWithApiKey,
 } from "../upstream/anthropic-api";
 import { applyCloaking } from "../upstream/cloaking";
 import {
@@ -22,6 +25,9 @@ const ANTHROPIC_OAUTH: ProviderOAuthInfo = {
   callbackPath: "/callback",
 };
 
+const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
+const ANTHROPIC_API_KEY_ACCOUNT_UUID = "anthropic-api-key";
+const ANTHROPIC_API_BASE_URL = "https://api.anthropic.com";
 const MODEL_RE = /^claude-/i;
 
 const ADVERTISED_MODELS = [
@@ -32,6 +38,24 @@ const ADVERTISED_MODELS = [
   "claude-haiku-4-5-20251001",
 ];
 
+export function makeAnthropicApiKeyToken(
+  apiKey: string,
+  apiKeyEnv: string = ANTHROPIC_API_KEY_ENV,
+): TokenData {
+  return {
+    accessToken: apiKey,
+    refreshToken: "",
+    email: `anthropic-api-key@${apiKeyEnv.toLowerCase()}`,
+    expiresAt: "9999-12-31T23:59:59.999Z",
+    accountUuid: ANTHROPIC_API_KEY_ACCOUNT_UUID,
+    provider: "anthropic",
+  };
+}
+
+export function isAnthropicApiKeyToken(token: TokenData): boolean {
+  return token.accountUuid === ANTHROPIC_API_KEY_ACCOUNT_UUID;
+}
+
 export function buildAnthropicProvider(authDir: string): Provider {
   const manager = new AccountManager(authDir, {
     provider: "anthropic",
@@ -40,6 +64,11 @@ export function buildAnthropicProvider(authDir: string): Provider {
       return { ...token, provider: "anthropic" };
     },
   });
+  const apiKey = process.env[ANTHROPIC_API_KEY_ENV]?.trim();
+  const storedTokens = loadAllTokens(authDir, "anthropic");
+  if (apiKey && !storedTokens.some(isAnthropicApiKeyToken)) {
+    manager.addEphemeralAccount(makeAnthropicApiKeyToken(apiKey));
+  }
 
   return {
     id: "anthropic",
@@ -60,14 +89,30 @@ export function buildAnthropicProvider(authDir: string): Provider {
     },
     listModels: async () =>
       ADVERTISED_MODELS.map((id) => ({ id, owned_by: "anthropic" })),
-    callMessages: (opts: UpstreamCallContext) => callAnthropicMessages(opts),
+    callMessages: (opts: UpstreamCallContext) =>
+      isAnthropicApiKeyToken(opts.account.token)
+        ? callAnthropicMessagesWithApiKey({
+            ...opts,
+            baseUrl: ANTHROPIC_API_BASE_URL,
+            resolveModelId: true,
+            includeBetaHeaders: true,
+          })
+        : callAnthropicMessages(opts),
     callCountTokens: (opts: UpstreamCallContext) =>
-      callAnthropicCountTokens({
-        request: opts.request,
-        account: opts.account,
-        config: opts.config,
-        signal: opts.signal,
-      }),
+      isAnthropicApiKeyToken(opts.account.token)
+        ? callAnthropicCountTokensWithApiKey({
+            request: opts.request,
+            account: opts.account,
+            config: opts.config,
+            signal: opts.signal,
+            baseUrl: ANTHROPIC_API_BASE_URL,
+          })
+        : callAnthropicCountTokens({
+            request: opts.request,
+            account: opts.account,
+            config: opts.config,
+            signal: opts.signal,
+          }),
     applyCloaking: (opts: CloakingContext) => applyCloaking(opts),
   };
 }

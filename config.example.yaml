@@ -1,14 +1,24 @@
 host: ""
 port: 8317
 
-# Directory to store OAuth tokens
+# Directory to store provider credentials
 auth-dir: "~/.auth2api"
+
+# Claude accepts either OAuth or an Anthropic API key. Set ANTHROPIC_API_KEY
+# for non-interactive startup, or save it with --login --auth=api-key.
 
 # DeepSeek API-key authentication. Keep the key in the environment (or a
 # secrets manager), never in this file.
 deepseek:
   api-key-env: "DEEPSEEK_API_KEY"
   base-url: "https://api.deepseek.com/anthropic"
+
+# Gemini API-key authentication. auth2api translates OpenAI Responses requests
+# to Gemini's native GenerateContent API. Keep the key in the environment (or
+# a secrets manager), never in this file.
+gemini:
+  api-key-env: "GEMINI_API_KEY"
+  base-url: "https://generativelanguage.googleapis.com/v1beta"
 
 # API keys for client authentication (clients use these to access this proxy)
 api-keys:

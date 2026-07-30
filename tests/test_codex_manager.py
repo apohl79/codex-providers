@@ -318,6 +318,128 @@ class ClaudeOpus5SupportTest(unittest.TestCase):
         )
 
 
+class GeminiProxyBackendTest(unittest.TestCase):
+    def test_fetch_models_uses_auth2api_key(self) -> None:
+        backend = codex_manager.BACKENDS["gemini"]
+
+        with (
+            patch.object(codex_manager.urllib.request, "urlopen") as urlopen,
+        ):
+            urlopen.return_value.__enter__.return_value.read.return_value = b'{"data": [{"id": "gemini-3.6-flash"}]}'
+            models, _ = codex_manager.fetch_models("https://example.test/v1", "auth2api-key", backend)
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(
+            (models, request.get_header("X-goog-api-key"), request.get_header("Authorization"), request.get_header("X-api-key")),
+            (["gemini-3.6-flash"], None, "Bearer auth2api-key", "auth2api-key"),
+        )
+
+    def test_gemini_prompt_identifies_gemini(self) -> None:
+        self.assertEqual(
+            codex_manager.load_prompt(MODULE_PATH.parent, "gemini").splitlines()[0],
+            "You are Codex, an agent based on Gemini. You and the user share one workspace, and your job is to collaborate with them until their goal is genuinely handled.",
+        )
+
+    def test_gemini_main_creates_an_auth2api_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            auth2api_config = root / "config.yaml"
+            codex_home = root / "codex"
+            args = type(
+                "Args",
+                (),
+                {
+                    "update_models_cache": False,
+                    "codex_home": str(codex_home),
+                    "codex_config": str(codex_home / "config.toml"),
+                    "auth2api_config": str(auth2api_config),
+                    "source_context": None,
+                    "preset_explicit": True,
+                    "yes": True,
+                    "preset": "gemini",
+                    "dry_run": True,
+                    "skip_login_check": False,
+                    "manual_login": False,
+                },
+            )()
+            draft = codex_manager.Draft(
+                "gemini",
+                codex_home / "gemini.config.toml",
+                "gemini",
+                "Gemini",
+                codex_manager.BACKENDS["gemini"],
+                "http://127.0.0.1:8317/v1",
+                ("gemini-3.6-flash",),
+                "gemini-3.6-flash",
+                "gemini-3.6-flash",
+                "medium",
+                400000,
+                380000,
+                8,
+                codex_home / "gemini-models.json",
+                True,
+            )
+
+            with (
+                patch.dict(codex_manager.os.environ, {"GEMINI_API_KEY": "gemini-key"}),
+                patch.object(codex_manager, "parse_args", return_value=args),
+                patch.object(
+                    codex_manager,
+                    "ensure_api_key",
+                    return_value=(
+                        codex_manager.Auth2ApiConfig(
+                            "127.0.0.1",
+                            8317,
+                            "~/.auth2api",
+                            "auth2api-key",
+                            "DEEPSEEK_API_KEY",
+                        ),
+                        [],
+                        True,
+                    ),
+                ) as ensure_api_key,
+                patch.object(codex_manager, "noninteractive_draft", return_value=(draft, {})),
+                patch.object(codex_manager, "agent_definitions", return_value=()),
+            ):
+                result = codex_manager.main()
+
+            self.assertEqual((result, ensure_api_key.call_args.args, auth2api_config.exists()), (0, (auth2api_config, True), False))
+
+    def test_missing_gemini_login_runs_auth2api_login(self) -> None:
+        args = type("Args", (), {"skip_login_check": False, "dry_run": False, "yes": False, "manual_login": False})()
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(codex_manager.os.environ, {}, clear=True),
+                patch.object(codex_manager, "has_gemini_login", side_effect=[False, True]),
+                patch.object(codex_manager, "run_gemini_login") as gemini_login,
+            ):
+                codex_manager.ensure_backend_login(
+                    args,
+                    Path("/tmp/auth2api"),
+                    Path("/tmp/auth2api/config.yaml"),
+                    codex_manager.Auth2ApiConfig("127.0.0.1", 8317, directory, "local-key", "DEEPSEEK_API_KEY"),
+                    interactive_tty=True,
+                    backend=codex_manager.BACKENDS["gemini"],
+                )
+
+            gemini_login.assert_called_once_with(Path("/tmp/auth2api"), Path("/tmp/auth2api/config.yaml"))
+
+    def test_gemini_provider_block_targets_auth2api_responses_endpoint(self) -> None:
+        draft = codex_manager.Draft(
+            "gemini", Path("/tmp/gemini.toml"), "gemini", "Gemini", codex_manager.BACKENDS["gemini"],
+            "http://127.0.0.1:8317/v1", ("gemini-3.6-flash",), "gemini-3.6-flash", "gemini-3.6-flash",
+            "medium", 400000, 380000, 8, Path("/tmp/gemini-models.json"), False,
+        )
+
+        provider = codex_manager.provider_block(draft, Path("/tmp/auth2api"), Path("/tmp/auth2api/config.yaml"))
+
+        self.assertEqual(
+            ("base_url = \"http://127.0.0.1:8317/v1\"" in provider, "wire_api = \"responses\"" in provider, "generativelanguage.googleapis.com" in provider),
+            (True, True, False),
+        )
+
+
 class ProviderMenuTest(unittest.TestCase):
     class FakeUi:
         def __init__(self, selections: list[int]) -> None:
@@ -328,15 +450,24 @@ class ProviderMenuTest(unittest.TestCase):
             self.calls.append((title, items))
             return next(self.selections)
 
-    def test_add_menu_disables_configured_provider(self) -> None:
-        ui = self.FakeUi([0, 1])
+    def test_add_menu_enables_unconfigured_gemini_provider(self) -> None:
+        ui = self.FakeUi([0, 2])
 
-        selection = codex_manager.choose_provider_action(ui, {"claude"})
+        selection = codex_manager.choose_provider_action(ui, {"claude", "deepseek"})
 
-        self.assertEqual(selection, ("add", "deepseek"))
+        self.assertEqual(selection, ("add", "gemini"))
         add_items = ui.calls[1][1]
-        self.assertEqual(add_items[0][2], False)
-        self.assertEqual(add_items[1][2], True)
+        self.assertEqual(
+            [(item[0], codex_manager.menu_item_parts(item)[2]) for item in add_items],
+            [("Claude", False), ("DeepSeek", False), ("Gemini", True), ("Abort", True)],
+        )
+
+    def test_gemini_credential_does_not_count_as_a_configured_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(codex_manager.os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            codex_home = Path(directory)
+            (codex_home / "config.toml").write_text("[model_providers.anthropic]\n[model_providers.deepseek]\n")
+            configured = codex_manager.configured_backends(codex_home, codex_home / "config.toml")
+        self.assertEqual(configured, {"claude", "deepseek"})
 
     def test_menu_item_parts_accepts_enabled_metadata(self) -> None:
         self.assertEqual(
@@ -348,14 +479,14 @@ class ProviderMenuTest(unittest.TestCase):
             ("Abort", "Exit", True),
         )
 
-    def test_add_menu_is_disabled_when_both_providers_are_configured(self) -> None:
+    def test_add_menu_is_disabled_when_all_providers_are_configured(self) -> None:
         ui = self.FakeUi([1, 0])
 
-        selection = codex_manager.choose_provider_action(ui, {"claude", "deepseek"})
+        selection = codex_manager.choose_provider_action(ui, {"claude", "deepseek", "gemini"})
 
         self.assertEqual(selection, ("manage", "claude"))
         manager_items = ui.calls[1][1]
-        self.assertEqual([item[0] for item in manager_items], ["Claude", "DeepSeek", "Abort"])
+        self.assertEqual([item[0] for item in manager_items], ["Claude", "DeepSeek", "Gemini", "Abort"])
         top_items = ui.calls[0][1]
         self.assertEqual(top_items[0][2], False)
         self.assertEqual(top_items[1][2], True)

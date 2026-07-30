@@ -5,7 +5,10 @@ import { Config } from "../config";
 
 export type { ProviderId };
 
-export type NativeFormat = "anthropic-messages" | "openai-responses";
+export type NativeFormat =
+  | "anthropic-messages"
+  | "openai-responses"
+  | "gemini-generate-content";
 
 export interface UpstreamCallContext {
   body?: any;
@@ -46,7 +49,7 @@ export interface Provider {
   ): Promise<TokenData>;
   /** Models advertised on /v1/models when this provider has accounts. */
   listModels(): Promise<Array<{ id: string; owned_by: string }>>;
-  /** Anthropic-Messages → upstream call. */
+  /** Translated request → upstream call. */
   callMessages(opts: UpstreamCallContext): Promise<Response>;
   /** Optional — undefined for codex (no count_tokens analog). */
   callCountTokens?(opts: UpstreamCallContext): Promise<Response>;
