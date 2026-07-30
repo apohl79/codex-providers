@@ -81,16 +81,17 @@ quote_shell_value() {
 }
 
 install_zshrc_block() {
-  local quoted_runner zshrc_dir
+  local quoted_runner_relative_path runner_relative_path zshrc_dir
   zshrc_dir="$(dirname "$ZSHRC_PATH")"
   mkdir -p "$zshrc_dir"
 
   remove_zshrc_block || true
-  quoted_runner="$(quote_shell_value "$RUNNER_PATH")"
+  runner_relative_path="${RUNNER_PATH#"$HOME"/}"
+  quoted_runner_relative_path="$(quote_shell_value "$runner_relative_path")"
 
   {
     printf '\n%s\n' "$ZSHRC_BEGIN"
-    printf 'AUTH2API_RUNNER_PATH=%s\n' "$quoted_runner"
+    printf 'AUTH2API_RUNNER_PATH="$HOME"/%s\n' "$quoted_runner_relative_path"
     printf '%s\n' "if [[ -x \"\$AUTH2API_RUNNER_PATH\" ]]; then"
     printf '%s\n' "  \"\$AUTH2API_RUNNER_PATH\" ensure >/dev/null 2>&1 || true"
     printf 'fi\n'
