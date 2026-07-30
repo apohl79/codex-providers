@@ -323,6 +323,14 @@ class ClaudeOpus5SupportTest(unittest.TestCase):
 
 
 class GeminiProxyBackendTest(unittest.TestCase):
+    def test_gemini_backend_uses_google_for_codex_and_gemini_for_auth2api(self) -> None:
+        backend = codex_manager.BACKENDS["gemini"]
+
+        self.assertEqual(
+            (backend.default_provider, backend.auth2api_provider, backend.provider_aliases),
+            ("google", "gemini", ("google", "gemini", "local-gemini")),
+        )
+
     def test_gemini_catalog_upgrades_text_only_source_for_image_input(self) -> None:
         catalog = codex_manager.build_catalog(
             ("gemini-3.6-flash",),
@@ -454,7 +462,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
 
     def test_gemini_provider_block_targets_auth2api_responses_endpoint(self) -> None:
         draft = codex_manager.Draft(
-            "gemini", Path("/tmp/gemini.toml"), "gemini", "Gemini", codex_manager.BACKENDS["gemini"],
+            "gemini", Path("/tmp/gemini.toml"), "google", "Gemini", codex_manager.BACKENDS["gemini"],
             "http://127.0.0.1:8317/v1", ("gemini-3.6-flash",), "gemini-3.6-flash", "gemini-3.6-flash",
             "medium", 400000, 380000, 8, Path("/tmp/gemini-models.json"), False,
         )
@@ -467,9 +475,32 @@ class GeminiProxyBackendTest(unittest.TestCase):
                 "query_params = { provider = \"gemini\" }" in provider,
                 "wire_api = \"responses\"" in provider,
                 "generativelanguage.googleapis.com" in provider,
+                "[model_providers.google]" in provider,
             ),
-            (True, True, True, False),
+            (True, True, True, False, True),
         )
+
+    def test_write_files_migrates_gemini_context_to_google_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = root / "config.toml"
+            context_path = root / "gemini.config.toml"
+            config_path.write_text('[model_providers.gemini]\nname = "Gemini"\n\n[model_providers.gemini.auth]\ncommand = "node"\n')
+            draft = codex_manager.Draft(
+                "gemini", context_path, "google", "Gemini", codex_manager.BACKENDS["gemini"],
+                "http://127.0.0.1:8317/v1", ("gemini-3.6-flash",), "gemini-3.6-flash", "gemini-3.6-flash",
+                "medium", 400000, 380000, 8, root / "gemini-models.json", False,
+            )
+
+            codex_manager.write_files(
+                draft, config_path, MODULE_PATH.parent, root / "auth2api.yaml", {"models": []}
+            )
+            provider_data = codex_manager.tomllib.loads(config_path.read_text())["model_providers"]
+
+            self.assertEqual(
+                (codex_manager.tomllib.loads(context_path.read_text())["model_provider"], sorted(provider_data), provider_data["google"]["query_params"]),
+                ("google", ["google"], {"provider": "gemini"}),
+            )
 
 
 class ProviderMenuTest(unittest.TestCase):

@@ -63,6 +63,7 @@ class Backend:
     description: str
     default_context: str
     default_provider: str
+    auth2api_provider: str
     context_aliases: tuple[str, ...]
     provider_aliases: tuple[str, ...]
     display_name: str
@@ -121,6 +122,7 @@ BACKENDS = {
         description="Uses your Anthropic/Claude OAuth tokens. Best for Claude models.",
         default_context="claude",
         default_provider="anthropic",
+        auth2api_provider="anthropic",
         context_aliases=("claude", "local-claude"),
         provider_aliases=("anthropic", "claude", "local-claude"),
         display_name="Claude",
@@ -139,6 +141,7 @@ BACKENDS = {
         description="Uses your stored DeepSeek API key. Best for DeepSeek models.",
         default_context="deepseek",
         default_provider="deepseek",
+        auth2api_provider="deepseek",
         context_aliases=("deepseek", "local-deepseek"),
         provider_aliases=("deepseek", "local-deepseek"),
         display_name="DeepSeek",
@@ -149,9 +152,10 @@ BACKENDS = {
         label="Gemini",
         description="Uses your Gemini API key through the local auth2api adapter.",
         default_context="gemini",
-        default_provider="gemini",
+        default_provider="google",
+        auth2api_provider="gemini",
         context_aliases=("gemini", "local-gemini"),
-        provider_aliases=("gemini", "local-gemini"),
+        provider_aliases=("google", "gemini", "local-gemini"),
         display_name="Gemini",
         fallback_models=("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3-pro-preview"),
     ),
@@ -1070,7 +1074,7 @@ def fetch_models(
     api_key: str | None,
     backend: Backend,
 ) -> tuple[list[str], str]:
-    query = urllib.parse.urlencode({"provider": backend.default_provider})
+    query = urllib.parse.urlencode({"provider": backend.auth2api_provider})
     url = f"{base_url.rstrip('/')}/models?{query}"
     request = urllib.request.Request(url)
     if api_key:
@@ -1360,7 +1364,7 @@ def provider_block(draft: Draft, repo_dir: Path, auth2api_config: Path) -> str:
     prices_toml = _model_prices_toml(draft)
     auth2api_base_url = normalize_base_url(default_base_url(read_auth2api_config(auth2api_config)))
     query_params = (
-        f"query_params = {{ provider = {toml_string(draft.backend.default_provider)} }}\n"
+        f"query_params = {{ provider = {toml_string(draft.backend.auth2api_provider)} }}\n"
         if draft.base_url == auth2api_base_url
         else ""
     )
@@ -1486,8 +1490,11 @@ def write_files(
     for agent in agents:
         agent.path.parent.mkdir(parents=True, exist_ok=True)
     existing_config = codex_config.read_text() if codex_config.exists() else ""
+    provider_config = remove_provider_blocks(existing_config, draft.provider_id)
+    if draft.backend.key == "gemini":
+        provider_config = remove_provider_blocks(provider_config, "gemini")
     next_config = (
-        f"{remove_multi_agent_v2_block(remove_provider_blocks(existing_config, draft.provider_id))}"
+        f"{remove_multi_agent_v2_block(provider_config)}"
         f"\n\n{multi_agent_v2_block(draft.max_concurrent_threads_per_session)}"
         f"\n\n{provider_block(draft, repo_dir, auth2api_config)}\n"
     )
@@ -1970,7 +1977,11 @@ def choose_draft(
 
     if existing:
         context_name = existing.name
-        provider_id = existing.provider_id or sanitize_identifier(existing.name)
+        provider_id = (
+            backend.default_provider
+            if backend.key == "gemini"
+            else existing.provider_id or sanitize_identifier(existing.name)
+        )
         display_name = providers.get(provider_id, ProviderInfo(provider_id, backend.display_name, "")).name
         context_window = existing.context_window
         compact_limit = existing.compact_limit
@@ -2152,7 +2163,11 @@ def noninteractive_draft(
     catalog_source_context = existing or source_context
     source_catalog = load_catalog(catalog_source_context.catalog_path if catalog_source_context else None)
     context_name = sanitize_identifier(existing.name if existing else backend.default_context)
-    provider_id = sanitize_identifier(existing.provider_id if existing and existing.provider_id else backend.default_provider)
+    provider_id = sanitize_identifier(
+        backend.default_provider
+        if backend.key == "gemini"
+        else existing.provider_id if existing and existing.provider_id else backend.default_provider
+    )
     context_window = int(args.context_window or (catalog_source_context.context_window if catalog_source_context else DEFAULT_CONTEXT_WINDOW))
     compact_limit = int(args.compact_limit or (catalog_source_context.compact_limit if catalog_source_context else DEFAULT_COMPACT_LIMIT))
     reasoning_level = args.reasoning_level or catalog_default_reasoning_level(source_catalog, selected_models)
