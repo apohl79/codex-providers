@@ -315,6 +315,13 @@ class ClaudeOpus5SupportTest(unittest.TestCase):
         self.assertEqual(backend.fallback_models[0], "claude-opus-5")
         self.assertEqual(codex_manager.canonical_model("opus-5"), "claude-opus-5")
 
+    def test_claude_haiku_alias_normalizes_to_the_canonical_model(self) -> None:
+        models = codex_manager.normalize_models(
+            ["claude-haiku-4-5-20251001", "claude-haiku-4-5"]
+        )
+
+        self.assertEqual(models, ["claude-haiku-4-5-20251001"])
+
     def test_claude_opus_5_uses_current_anthropic_token_prices(self) -> None:
         self.assertEqual(
             codex_manager._claude_model_prices()["claude-opus-5"],
