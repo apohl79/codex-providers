@@ -966,7 +966,7 @@ def with_catalog_schema(entry: dict, backend: Backend) -> dict:
         "supports_parallel_tool_calls": False,
         "supports_image_detail_original": backend.key != "deepseek",
         "experimental_supported_tools": [],
-        "input_modalities": ["text"] if backend.key in ("deepseek", "gemini") else ["text", "image"],
+        "input_modalities": ["text"] if backend.key == "deepseek" else ["text", "image"],
         "include_skills_usage_instructions": False,
         "default_reasoning_summary": "none",
         "additional_speed_tiers": [],
@@ -980,6 +980,8 @@ def with_catalog_schema(entry: dict, backend: Backend) -> dict:
     }
     for key, value in defaults.items():
         updated.setdefault(key, value)
+    if backend.key == "gemini":
+        updated["input_modalities"] = ["text", "image"]
     if backend.key in {"claude", "deepseek"}:
         # auth2api translates Responses function tools to Anthropic tools. Its
         # custom freeform code-mode tool is not forwarded to Anthropic-backed providers.
@@ -2013,6 +2015,14 @@ def choose_draft(
     )
     default_model = selected_models[default_index]
 
+    fast_index = ui.menu(
+        "Fast Model",
+        "Codex uses this model for time-sensitive tasks and fast sub-agent work.",
+        [(model, "Included in the generated model catalog.") for model in selected_models],
+        selected_models.index(fast_model_for_backend(backend)),
+    )
+    fast_model = selected_models[fast_index]
+
     current_reasoning_level = args.reasoning_level or catalog_default_reasoning_level(source_catalog, selected_models)
     reasoning_index = ui.menu(
         "Reasoning Level",
@@ -2077,7 +2087,7 @@ def choose_draft(
         base_url=base_url,
         selected_models=selected_models,
         default_model=default_model,
-        fast_model=fast_model_for_backend(backend),
+        fast_model=fast_model,
         reasoning_level=reasoning_level,
         context_window=context_window,
         compact_limit=compact_limit,

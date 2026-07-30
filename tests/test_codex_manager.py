@@ -323,6 +323,17 @@ class ClaudeOpus5SupportTest(unittest.TestCase):
 
 
 class GeminiProxyBackendTest(unittest.TestCase):
+    def test_gemini_catalog_upgrades_text_only_source_for_image_input(self) -> None:
+        catalog = codex_manager.build_catalog(
+            ("gemini-3.6-flash",),
+            codex_manager.BACKENDS["gemini"],
+            {"models": [{"slug": "gemini-3.6-flash", "input_modalities": ["text"]}]},
+            400000,
+            "medium",
+        )
+
+        self.assertEqual(catalog["models"][0]["input_modalities"], ["text", "image"])
+
     def test_fetch_models_uses_auth2api_key(self) -> None:
         backend = codex_manager.BACKENDS["gemini"]
 
@@ -520,6 +531,53 @@ class ProviderMenuTest(unittest.TestCase):
             ["Keep current limits", "1M context", "Recommended context", "Small context", "Tiny context"],
         )
         self.assertFalse(any("Claude" in text for item in choices for text in item))
+
+
+class FastModelSelectionTest(unittest.TestCase):
+    class FakeUi:
+        def __init__(self) -> None:
+            self.menu_titles: list[str] = []
+
+        def multi_select(self, title: str, subtitle: str, items: list[str], defaults: set[int]) -> set[int]:
+            return set(range(len(items)))
+
+        def menu(self, title: str, subtitle: str, items: list[codex_manager.MenuItem], default: int = 0) -> int:
+            self.menu_titles.append(title)
+            return 1 if title in {"Fast Model", "Summary"} else 0
+
+    def test_choose_draft_prompts_for_and_uses_fast_model_for_each_provider(self) -> None:
+        results = []
+        args = type(
+            "Args",
+            (),
+            {
+                "source_context": None,
+                "display_name": None,
+                "context_window": None,
+                "compact_limit": None,
+                "reasoning_level": None,
+                "max_concurrent_threads_per_session": None,
+            },
+        )()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for preset, backend in codex_manager.BACKENDS.items():
+                args.preset = preset
+                ui = self.FakeUi()
+                with patch.object(codex_manager, "fetch_models", return_value=(list(backend.fallback_models), "test models")):
+                    draft, _ = codex_manager.choose_draft(
+                        ui, args, root / preset, root / "config.toml", root, root / "config.yaml"
+                    )
+                results.append((preset, draft.fast_model, ui.menu_titles))
+
+        self.assertEqual(
+            results,
+            [
+                ("claude", "claude-opus-4-8", ["Default Model", "Fast Model", "Reasoning Level", "Token Budget", "Sub-agent Concurrency", "Summary"]),
+                ("deepseek", "deepseek-v4-flash", ["Default Model", "Fast Model", "Reasoning Level", "Token Budget", "Sub-agent Concurrency", "Summary"]),
+                ("gemini", "gemini-3.5-flash", ["Default Model", "Fast Model", "Reasoning Level", "Token Budget", "Sub-agent Concurrency", "Summary"]),
+            ],
+        )
 
 
 if __name__ == "__main__":

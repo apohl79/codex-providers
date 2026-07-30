@@ -42,7 +42,10 @@ function contentParts(content: unknown): Record<string, unknown>[] {
         : [];
     }
     if (part?.type === "input_image" || part?.type === "image") {
-      const imageUrl = part.image_url?.url || part.url;
+      const imageUrl =
+        typeof part.image_url === "string"
+          ? part.image_url
+          : part.image_url?.url || part.url;
       const imagePart = inlineDataPart(imageUrl);
       return imagePart ? [imagePart] : [];
     }
@@ -115,6 +118,16 @@ function appendContent(
   contents.push({ role, parts });
 }
 
+function geminiSchema(schema: any): any {
+  if (Array.isArray(schema)) return schema.map(geminiSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => key !== "additionalProperties")
+      .map(([key, value]) => [key, geminiSchema(value)]),
+  );
+}
+
 function toolDeclarations(tools: any): Record<string, unknown>[] {
   if (!Array.isArray(tools)) return [];
   const declarations = tools.flatMap((tool: any) => {
@@ -123,8 +136,10 @@ function toolDeclarations(tools: any): Record<string, unknown>[] {
         {
           name: tool.name,
           description: tool.description || "",
-          parameters: tool.parameters ||
-            tool.input_schema || { type: "object", properties: {} },
+          parameters: geminiSchema(
+            tool.parameters ||
+              tool.input_schema || { type: "object", properties: {} },
+          ),
         },
       ];
     }
@@ -133,12 +148,12 @@ function toolDeclarations(tools: any): Record<string, unknown>[] {
         {
           name: tool.name,
           description: tool.description || "",
-          parameters: {
+          parameters: geminiSchema({
             type: "object",
             properties: { input: { type: "string" } },
             required: ["input"],
             additionalProperties: false,
-          },
+          }),
         },
       ];
     }
