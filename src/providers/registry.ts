@@ -26,15 +26,15 @@ export function buildRegistry(
   const codex = buildCodexProvider(authDir);
   const cursor = buildCursorProvider(authDir);
   const deepseek = buildDeepSeekProvider(authDir, deepseekConfig);
-  const gemini = buildGeminiProvider(authDir, geminiConfig);
+  const google = buildGeminiProvider(authDir, geminiConfig);
   const byId: Record<ProviderId, Provider> = {
     anthropic,
     codex,
     cursor,
     deepseek,
-    gemini,
+    google,
   };
-  const ordered: Provider[] = [anthropic, codex, cursor, deepseek, gemini];
+  const ordered: Provider[] = [anthropic, codex, cursor, deepseek, google];
 
   return {
     get: (id) => {
@@ -57,13 +57,13 @@ export function buildRegistry(
         anthropic.manager.accountCount === 0 &&
         codex.manager.accountCount === 0 &&
         deepseek.manager.accountCount === 0 &&
-        gemini.manager.accountCount === 0;
+        google.manager.accountCount === 0;
       if (cursorOnly) return cursor;
 
       // Multi-provider setups: fall back to the explicit family routes.
       if (codex.matchesModel(resolved)) return codex;
       if (deepseek.matchesModel(resolved)) return deepseek;
-      if (gemini.matchesModel(resolved)) return gemini;
+      if (google.matchesModel(resolved)) return google;
       if (anthropic.matchesModel(resolved)) return anthropic;
       // Unknown model + multi-provider: keep historical behaviour and
       // dispatch to anthropic so the client gets a clear "no account" error

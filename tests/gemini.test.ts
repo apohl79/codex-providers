@@ -189,6 +189,16 @@ const EXPECTED_NESTED_SCHEMA_TOOLS = [
   },
 ];
 
+const LEGACY_GEMINI_TOKEN = JSON.stringify({
+  access_token: "legacy-gemini-key",
+  refresh_token: "",
+  last_refresh: "2026-01-01T00:00:00.000Z",
+  email: "legacy@example.com",
+  type: "gemini",
+  expired: "9999-12-31T23:59:59.999Z",
+  account_uuid: "gemini-api-key",
+});
+
 test("Gemini API-key credentials persist and reload from auth-dir", () => {
   const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-gemini-"));
   try {
@@ -196,13 +206,13 @@ test("Gemini API-key credentials persist and reload from auth-dir", () => {
 
     const files = fs.readdirSync(authDir);
     assert.equal(files.length, 1);
-    assert.match(files[0], /^gemini-/);
+    assert.match(files[0], /^google-/);
     assert.equal(fs.statSync(path.join(authDir, files[0])).mode & 0o777, 0o600);
 
-    const loaded = loadAllTokens(authDir, "gemini");
+    const loaded = loadAllTokens(authDir, "google");
     assert.equal(loaded.length, 1);
     assert.equal(loaded[0].accessToken, "gemini-test-key");
-    assert.equal(loaded[0].provider, "gemini");
+    assert.equal(loaded[0].provider, "google");
 
     const provider = buildGeminiProvider(authDir);
     provider.manager.load();
@@ -210,6 +220,27 @@ test("Gemini API-key credentials persist and reload from auth-dir", () => {
     assert.equal(
       provider.manager.getNextAccount().account?.token.accessToken,
       "gemini-test-key",
+    );
+  } finally {
+    fs.rmSync(authDir, { recursive: true, force: true });
+  }
+});
+
+test("Google provider loads legacy Gemini API-key credentials", () => {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-gemini-"));
+  try {
+    fs.writeFileSync(
+      path.join(authDir, "gemini-legacy@example.com.json"),
+      LEGACY_GEMINI_TOKEN,
+      { mode: 0o600 },
+    );
+
+    assert.deepEqual(
+      loadAllTokens(authDir, "google").map(({ accessToken, provider }) => ({
+        accessToken,
+        provider,
+      })),
+      [{ accessToken: "legacy-gemini-key", provider: "google" }],
     );
   } finally {
     fs.rmSync(authDir, { recursive: true, force: true });

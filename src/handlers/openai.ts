@@ -607,7 +607,7 @@ export function createChatCompletionsHandler(
       const provider = registry.forModel(model);
       tagStatsModel(resp, model, provider.id);
 
-      if (provider.id === "gemini") {
+      if (provider.id === "google") {
         resp.status(400).json({
           error: {
             message: "Gemini currently supports /v1/responses only.",

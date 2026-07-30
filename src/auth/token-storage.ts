@@ -10,14 +10,14 @@ const FILENAME_PREFIX: Record<ProviderId, string> = {
   codex: "codex",
   cursor: "cursor",
   deepseek: "deepseek",
-  gemini: "gemini",
+  google: "google",
 };
 
 function normaliseProvider(type: TokenStorage["type"] | undefined): ProviderId {
   if (type === "cursor") return "cursor";
   if (type === "codex") return "codex";
   if (type === "deepseek") return "deepseek";
-  if (type === "gemini") return "gemini";
+  if (type === "google" || type === "gemini") return "google";
   return "anthropic"; // "claude" or missing → anthropic (legacy files)
 }
 
@@ -96,15 +96,21 @@ export function loadAllTokens(
 ): TokenData[] {
   if (!fs.existsSync(authDir)) return [];
   const allFiles = fs.readdirSync(authDir);
-  const matchPrefix = provider ? FILENAME_PREFIX[provider] : null;
+  const matchPrefixes = provider
+    ? provider === "google"
+      ? [FILENAME_PREFIX.google, "gemini"]
+      : [FILENAME_PREFIX[provider]]
+    : null;
   const files = allFiles.filter((f) => {
     if (!f.endsWith(".json")) return false;
-    if (matchPrefix) return f.startsWith(`${matchPrefix}-`);
+    if (matchPrefixes)
+      return matchPrefixes.some((prefix) => f.startsWith(`${prefix}-`));
     return (
       f.startsWith("claude-") ||
       f.startsWith("codex-") ||
       f.startsWith("cursor-") ||
       f.startsWith("deepseek-") ||
+      f.startsWith("google-") ||
       f.startsWith("gemini-")
     );
   });

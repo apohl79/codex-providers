@@ -323,12 +323,12 @@ class ClaudeOpus5SupportTest(unittest.TestCase):
 
 
 class GeminiProxyBackendTest(unittest.TestCase):
-    def test_gemini_backend_uses_google_for_codex_and_gemini_for_auth2api(self) -> None:
+    def test_gemini_backend_uses_google_for_codex_and_auth2api(self) -> None:
         backend = codex_manager.BACKENDS["gemini"]
 
         self.assertEqual(
             (backend.default_provider, backend.auth2api_provider, backend.provider_aliases),
-            ("google", "gemini", ("google", "gemini", "local-gemini")),
+            ("google", "google", ("google", "gemini", "local-gemini")),
         )
 
     def test_gemini_catalog_upgrades_text_only_source_for_image_input(self) -> None:
@@ -362,7 +362,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
             ),
             (
                 ["gemini-3.6-flash"],
-                "https://example.test/v1/models?provider=gemini",
+                "https://example.test/v1/models?provider=google",
                 None,
                 "Bearer auth2api-key",
                 "auth2api-key",
@@ -446,8 +446,8 @@ class GeminiProxyBackendTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with (
                 patch.dict(codex_manager.os.environ, {}, clear=True),
-                patch.object(codex_manager, "has_gemini_login", side_effect=[False, True]),
-                patch.object(codex_manager, "run_gemini_login") as gemini_login,
+                patch.object(codex_manager, "has_google_login", side_effect=[False, True]),
+                patch.object(codex_manager, "run_google_login") as google_login,
             ):
                 codex_manager.ensure_backend_login(
                     args,
@@ -458,7 +458,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
                     backend=codex_manager.BACKENDS["gemini"],
                 )
 
-            gemini_login.assert_called_once_with(Path("/tmp/auth2api"), Path("/tmp/auth2api/config.yaml"))
+            google_login.assert_called_once_with(Path("/tmp/auth2api"), Path("/tmp/auth2api/config.yaml"))
 
     def test_gemini_provider_block_targets_auth2api_responses_endpoint(self) -> None:
         draft = codex_manager.Draft(
@@ -472,7 +472,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
         self.assertEqual(
             (
                 "base_url = \"http://127.0.0.1:8317/v1\"" in provider,
-                "query_params = { provider = \"gemini\" }" in provider,
+                "query_params = { provider = \"google\" }" in provider,
                 "wire_api = \"responses\"" in provider,
                 "generativelanguage.googleapis.com" in provider,
                 "[model_providers.google]" in provider,
@@ -499,7 +499,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
 
             self.assertEqual(
                 (codex_manager.tomllib.loads(context_path.read_text())["model_provider"], sorted(provider_data), provider_data["google"]["query_params"]),
-                ("google", ["google"], {"provider": "gemini"}),
+                ("google", ["google"], {"provider": "google"}),
             )
 
 

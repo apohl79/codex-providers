@@ -26,7 +26,7 @@ export function makeGeminiApiKeyToken(
     email: `gemini-api-key@${apiKeyEnv.toLowerCase()}`,
     expiresAt: "9999-12-31T23:59:59.999Z",
     accountUuid: GEMINI_API_KEY_ACCOUNT_UUID,
-    provider: "gemini",
+    provider: "google",
   };
 }
 
@@ -37,25 +37,25 @@ export function buildGeminiProvider(
   const apiKeyEnv = config?.["api-key-env"] || DEFAULT_API_KEY_ENV;
   const baseUrl = config?.["base-url"] || DEFAULT_BASE_URL;
   const manager = new AccountManager(authDir, {
-    provider: "gemini",
+    provider: "google",
     refresh: async () => {
       throw new Error("Gemini API-key credentials do not support refresh");
     },
   });
   const apiKey = process.env[apiKeyEnv]?.trim();
-  const storedTokens = loadAllTokens(authDir, "gemini");
+  const storedTokens = loadAllTokens(authDir, "google");
   if (apiKey && storedTokens.length === 0) {
     manager.addEphemeralAccount(makeGeminiApiKeyToken(apiKey, apiKeyEnv));
   }
 
   return {
-    id: "gemini",
+    id: "google",
     nativeFormat: "gemini-generate-content",
     manager,
     matchesModel: (model: string) => MODEL_RE.test(model),
     listModels: async () =>
       manager.accountCount > 0
-        ? ADVERTISED_MODELS.map((id) => ({ id, owned_by: "gemini" }))
+        ? ADVERTISED_MODELS.map((id) => ({ id, owned_by: "google" }))
         : [],
     callMessages: (opts: UpstreamCallContext) =>
       callGeminiGenerateContent({ ...opts, baseUrl }),

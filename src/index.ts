@@ -98,11 +98,11 @@ function parseProviderArg(args: string[]): ProviderId {
     value === "codex" ||
     value === "cursor" ||
     value === "deepseek" ||
-    value === "gemini"
+    value === "google"
   )
     return value;
   throw new Error(
-    `Unknown provider "${value}". Supported: anthropic, codex, cursor, deepseek, gemini`,
+    `Unknown provider "${value}". Supported: anthropic, codex, cursor, deepseek, google`,
   );
 }
 
@@ -177,7 +177,7 @@ async function geminiLogin(
   if (!apiKey) throw new Error("Gemini API key cannot be empty");
 
   registry
-    .get("gemini")
+    .get("google")
     .manager.addAccount(makeGeminiApiKeyToken(apiKey, apiKeyEnv));
   console.log("\nGemini API key saved to auth-dir.");
   await notifyServerReload(config);
@@ -210,7 +210,7 @@ async function doLogin(
 
   if (!provider.oauth || !provider.buildAuthUrl || !provider.exchangeCode) {
     const apiKeyEnv =
-      providerId === "gemini"
+      providerId === "google"
         ? config.gemini?.["api-key-env"] || "GEMINI_API_KEY"
         : config.deepseek?.["api-key-env"] || "DEEPSEEK_API_KEY";
     throw new Error(
@@ -362,7 +362,7 @@ async function main(): Promise<void> {
       }
     } else if (providerId === "deepseek") {
       await deepSeekLogin(config, registry);
-    } else if (providerId === "gemini") {
+    } else if (providerId === "google") {
       await geminiLogin(config, registry);
     } else if (providerId === "anthropic" && authMethod === "api-key") {
       await anthropicApiKeyLogin(config, registry);

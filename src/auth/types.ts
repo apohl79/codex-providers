@@ -3,7 +3,7 @@ export type ProviderId =
   | "codex"
   | "cursor"
   | "deepseek"
-  | "gemini";
+  | "google";
 
 export interface PKCECodes {
   codeVerifier: string;
@@ -39,7 +39,7 @@ export interface TokenStorage {
   refresh_token: string;
   last_refresh: string;
   email: string;
-  type: ProviderId | "claude"; // "claude" retained for legacy files
+  type: ProviderId | "claude" | "gemini"; // "claude" and "gemini" retained for legacy files
   expired: string; // ISO 8601
   account_uuid?: string;
   id_token?: string;

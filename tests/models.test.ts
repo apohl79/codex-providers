@@ -65,7 +65,7 @@ async function startProviderCatalogServer(): Promise<{
   const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-models-"));
   saveToken(authDir, makeToken("anthropic"));
   saveToken(authDir, makeToken("deepseek"));
-  saveToken(authDir, makeToken("gemini"));
+  saveToken(authDir, makeToken("google"));
   const registry = buildRegistry(authDir);
   registry.all().forEach((provider) => provider.manager.load());
   const server = createHttpServer(createServer(makeConfig(authDir), registry));
@@ -153,7 +153,7 @@ test("filters Gemini models by provider", async (t) => {
   const { authDir, server } = await startProviderCatalogServer();
   t.after(() => stopProviderCatalogServer(server, authDir));
 
-  const result = await requestModels(server, "/v1/models?provider=gemini");
+  const result = await requestModels(server, "/v1/models?provider=google");
 
   assert.deepEqual(
     {
@@ -168,10 +168,10 @@ test("filters Gemini models by provider", async (t) => {
       status: 200,
       object: "list",
       models: [
-        { id: "gemini-3.6-flash", owned_by: "gemini" },
-        { id: "gemini-3.5-flash", owned_by: "gemini" },
-        { id: "gemini-3.1-pro-preview", owned_by: "gemini" },
-        { id: "gemini-3-pro-preview", owned_by: "gemini" },
+        { id: "gemini-3.6-flash", owned_by: "google" },
+        { id: "gemini-3.5-flash", owned_by: "google" },
+        { id: "gemini-3.1-pro-preview", owned_by: "google" },
+        { id: "gemini-3-pro-preview", owned_by: "google" },
       ],
     },
   );
@@ -182,12 +182,13 @@ test("rejects invalid provider model filters", async (t) => {
   t.after(() => stopProviderCatalogServer(server, authDir));
 
   const results = await Promise.all(
-    ["unknown", "anthropic&provider=deepseek"].map((provider) =>
+    ["unknown", "gemini", "anthropic&provider=deepseek"].map((provider) =>
       requestModels(server, `/v1/models?provider=${provider}`),
     ),
   );
 
   assert.deepEqual(results, [
+    { status: 400, body: { error: { message: "Invalid provider filter" } } },
     { status: 400, body: { error: { message: "Invalid provider filter" } } },
     { status: 400, body: { error: { message: "Invalid provider filter" } } },
   ]);

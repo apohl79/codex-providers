@@ -153,7 +153,7 @@ BACKENDS = {
         description="Uses your Gemini API key through the local auth2api adapter.",
         default_context="gemini",
         default_provider="google",
-        auth2api_provider="gemini",
+        auth2api_provider="google",
         context_aliases=("gemini", "local-gemini"),
         provider_aliases=("google", "gemini", "local-gemini"),
         display_name="Gemini",
@@ -570,8 +570,12 @@ def has_deepseek_login(auth_dir: Path, api_key_env: str) -> bool:
     return any(auth_dir.glob("deepseek-*.json")) or bool(os.environ.get(api_key_env, "").strip())
 
 
-def has_gemini_login(auth_dir: Path, api_key_env: str) -> bool:
-    return any(auth_dir.glob("gemini-*.json")) or bool(os.environ.get(api_key_env, "").strip())
+def has_google_login(auth_dir: Path, api_key_env: str) -> bool:
+    return (
+        any(auth_dir.glob("google-*.json"))
+        or any(auth_dir.glob("gemini-*.json"))
+        or bool(os.environ.get(api_key_env, "").strip())
+    )
 
 def provider_has_configuration(
     backend: Backend,
@@ -676,8 +680,8 @@ def run_deepseek_login(repo_dir: Path, config_path: Path) -> None:
     run_provider_login(repo_dir, config_path, "deepseek", False)
 
 
-def run_gemini_login(repo_dir: Path, config_path: Path) -> None:
-    run_provider_login(repo_dir, config_path, "gemini", False)
+def run_google_login(repo_dir: Path, config_path: Path) -> None:
+    run_provider_login(repo_dir, config_path, "google", False)
 
 
 def read_toml(path: Path) -> dict:
@@ -1820,18 +1824,18 @@ def ensure_backend_login(
 
     auth_dir = resolve_auth_dir(auth_config.auth_dir, repo_dir)
     if backend.key == "gemini":
-        if has_gemini_login(auth_dir, auth_config.gemini_api_key_env):
+        if has_google_login(auth_dir, auth_config.gemini_api_key_env):
             return
         if args.dry_run:
-            print(f"Would run Gemini login: no gemini-*.json credential exists in {auth_dir}")
+            print(f"Would run Gemini login: no google-*.json credential exists in {auth_dir}")
             return
         if not interactive_tty:
             raise SystemExit(
                 f"Error: no Gemini credential found in {auth_dir}. Run codex-manager from a terminal, set {auth_config.gemini_api_key_env}, or pass --skip-login-check."
             )
         print(f"No Gemini credential found in {auth_dir}. Enter a Gemini API key to configure auth2api.")
-        run_gemini_login(repo_dir, auth2api_config_path)
-        if not has_gemini_login(auth_dir, auth_config.gemini_api_key_env):
+        run_google_login(repo_dir, auth2api_config_path)
+        if not has_google_login(auth_dir, auth_config.gemini_api_key_env):
             raise SystemExit(f"Error: Gemini login completed but no credential was found in {auth_dir}.")
         return
 

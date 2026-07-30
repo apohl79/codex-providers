@@ -20,12 +20,21 @@ LOADER.exec_module(codex_manager)
 
 
 class GeminiCredentialPromptTest(unittest.TestCase):
-    def test_saved_gemini_credential_is_detected(self) -> None:
+    def test_saved_google_credential_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            credential = Path(directory) / "google-gemini-api-key@gemini_api_key.json"
+            credential.write_text(json.dumps({"provider": "google", "access_token": "value"}))
+
+            detected = codex_manager.has_google_login(Path(directory), "GEMINI_API_KEY")
+
+        self.assertTrue(detected)
+
+    def test_legacy_gemini_credential_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             credential = Path(directory) / "gemini-gemini-api-key@gemini_api_key.json"
             credential.write_text(json.dumps({"provider": "gemini", "access_token": "value"}))
 
-            detected = codex_manager.has_gemini_login(Path(directory), "GEMINI_API_KEY")
+            detected = codex_manager.has_google_login(Path(directory), "GEMINI_API_KEY")
 
         self.assertTrue(detected)
 
