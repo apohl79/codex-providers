@@ -8,7 +8,7 @@ import test from "node:test";
 
 import { saveToken } from "../src/auth/token-storage";
 import { ProviderId, TokenData } from "../src/auth/types";
-import { Config } from "../src/config";
+import { Config, loadConfig, ModelAdvertisementsConfig } from "../src/config";
 import { buildRegistry } from "../src/providers/registry";
 import { createServer } from "../src/server";
 
@@ -58,7 +58,9 @@ function makeToken(provider: ProviderId): TokenData {
   };
 }
 
-async function startProviderCatalogServer(): Promise<{
+async function startProviderCatalogServer(
+  modelAdvertisements?: ModelAdvertisementsConfig,
+): Promise<{
   authDir: string;
   server: ReturnType<typeof createHttpServer>;
 }> {
@@ -66,7 +68,12 @@ async function startProviderCatalogServer(): Promise<{
   saveToken(authDir, makeToken("anthropic"));
   saveToken(authDir, makeToken("deepseek"));
   saveToken(authDir, makeToken("google"));
-  const registry = buildRegistry(authDir);
+  const registry = buildRegistry(
+    authDir,
+    undefined,
+    undefined,
+    modelAdvertisements,
+  );
   registry.all().forEach((provider) => provider.manager.load());
   const server = createHttpServer(createServer(makeConfig(authDir), registry));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -175,6 +182,64 @@ test("filters Gemini models by provider", async (t) => {
       ],
     },
   );
+});
+
+test("advertises only the selected models for each managed provider", async (t) => {
+  const { authDir, server } = await startProviderCatalogServer({
+    anthropic: ["claude-sonnet-5"],
+    deepseek: ["deepseek-v4-flash"],
+    google: ["gemini-3.5-flash"],
+  });
+  t.after(() => stopProviderCatalogServer(server, authDir));
+
+  const results = await Promise.all(
+    ["anthropic", "deepseek", "google"].map((provider) =>
+      requestModels(server, `/v1/models?provider=${provider}`),
+    ),
+  );
+
+  assert.deepEqual(
+    results.map((result) => ({
+      status: result.status,
+      models: (result.body as ModelsResponse).data.map(({ id, owned_by }) => ({
+        id,
+        owned_by,
+      })),
+    })),
+    [
+      {
+        status: 200,
+        models: [{ id: "claude-sonnet-5", owned_by: "anthropic" }],
+      },
+      {
+        status: 200,
+        models: [{ id: "deepseek-v4-flash", owned_by: "deepseek" }],
+      },
+      {
+        status: 200,
+        models: [{ id: "gemini-3.5-flash", owned_by: "google" }],
+      },
+    ],
+  );
+});
+
+test("loads configured model advertisements", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-config-"));
+  const configPath = path.join(directory, "config.yaml");
+  try {
+    fs.writeFileSync(
+      configPath,
+      "api-keys: [test-key]\nmodel-advertisements:\n  anthropic: [claude-sonnet-5]\n  deepseek: [deepseek-v4-flash]\n  google: [gemini-3.5-flash]\n",
+    );
+
+    assert.deepEqual(loadConfig(configPath)["model-advertisements"], {
+      anthropic: ["claude-sonnet-5"],
+      deepseek: ["deepseek-v4-flash"],
+      google: ["gemini-3.5-flash"],
+    });
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("rejects invalid provider model filters", async (t) => {

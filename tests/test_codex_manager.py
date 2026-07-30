@@ -124,7 +124,7 @@ class DeepSeekBackendTest(unittest.TestCase):
 
         request = urlopen.call_args.args[0]
         self.assertEqual(request.full_url, "http://127.0.0.1:8317/v1/models?provider=deepseek")
-        self.assertEqual(models, ["deepseek-v4-pro", "custom-model"])
+        self.assertEqual(models, ["deepseek-v4-pro", "custom-model", "deepseek-v4-flash"])
         self.assertEqual(codex_manager.fast_model_for_backend(backend), "deepseek-v4-flash")
 
     def test_run_deepseek_login_uses_api_key_provider(self) -> None:
@@ -361,7 +361,12 @@ class GeminiProxyBackendTest(unittest.TestCase):
                 request.get_header("X-api-key"),
             ),
             (
-                ["gemini-3.6-flash"],
+                [
+                    "gemini-3.6-flash",
+                    "gemini-3.5-flash",
+                    "gemini-3.1-pro-preview",
+                    "gemini-3-pro-preview",
+                ],
                 "https://example.test/v1/models?provider=google",
                 None,
                 "Bearer auth2api-key",
@@ -485,6 +490,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
             root = Path(directory)
             config_path = root / "config.toml"
             context_path = root / "gemini.config.toml"
+            auth2api_config_path = root / "auth2api.yaml"
             config_path.write_text('[model_providers.gemini]\nname = "Gemini"\n\n[model_providers.gemini.auth]\ncommand = "node"\n')
             draft = codex_manager.Draft(
                 "gemini", context_path, "google", "Gemini", codex_manager.BACKENDS["gemini"],
@@ -493,14 +499,38 @@ class GeminiProxyBackendTest(unittest.TestCase):
             )
 
             codex_manager.write_files(
-                draft, config_path, MODULE_PATH.parent, root / "auth2api.yaml", {"models": []}
+                draft, config_path, MODULE_PATH.parent, auth2api_config_path, {"models": []}
             )
             provider_data = codex_manager.tomllib.loads(config_path.read_text())["model_providers"]
 
             self.assertEqual(
-                (codex_manager.tomllib.loads(context_path.read_text())["model_provider"], sorted(provider_data), provider_data["google"]["query_params"]),
-                ("google", ["google"], {"provider": "google"}),
+                (
+                    codex_manager.tomllib.loads(context_path.read_text())["model_provider"],
+                    sorted(provider_data),
+                    provider_data["google"]["query_params"],
+                    auth2api_config_path.read_text(),
+                ),
+                (
+                    "google",
+                    ["google"],
+                    {"provider": "google"},
+                    'model-advertisements:\n  google:\n    - "gemini-3.6-flash"\n',
+                ),
             )
+
+
+class ModelAdvertisementConfigTest(unittest.TestCase):
+    def test_upsert_model_advertisements_replaces_only_the_selected_provider(self) -> None:
+        updated = codex_manager.upsert_model_advertisements(
+            "port: 8317\nmodel-advertisements:\n  deepseek:\n    - deepseek-v4-pro\nstats:\n  enabled: true\n",
+            "anthropic",
+            ("claude-opus-5", "claude-sonnet-5"),
+        )
+
+        self.assertEqual(
+            updated,
+            "port: 8317\nmodel-advertisements:\n  deepseek:\n    - deepseek-v4-pro\n  anthropic:\n    - \"claude-opus-5\"\n    - \"claude-sonnet-5\"\nstats:\n  enabled: true\n",
+        )
 
 
 class ProviderMenuTest(unittest.TestCase):

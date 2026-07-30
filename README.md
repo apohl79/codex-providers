@@ -121,6 +121,10 @@ Open the printed URL in your browser. After authorizing, your browser will redir
 
 You can run `--login` multiple times to add additional accounts (per provider). auth2api stores credentials side-by-side in `auth-dir` (`claude-<email>.json`, `codex-<email>.json`, `deepseek-<email>.json`, `google-<email>.json`, and `cursor-<email>.json`) and routes inbound requests to the matching pool by model name. Existing `gemini-<email>.json` credentials remain readable during migration. API-key login writes an owner-only credential file; environment API keys remain in memory only. Logging in to only one provider is fine — the others simply have no advertised models.
 
+### Model advertisements
+
+`codex-manager` persists the models selected for a Claude, DeepSeek, or Google profile in `config.yaml` under `model-advertisements`. `GET /v1/models?provider=<provider>` then returns exactly that provider's selected list. Omit a provider from this setting to retain its complete built-in catalog. Restart the proxy after changing model advertisements so it reloads the configuration.
+
 > **Note on Codex:** The codex provider relays your ChatGPT Plus/Pro subscription quota. OpenAI's ToS does not officially permit relaying ChatGPT sessions through third-party tools — use this for your own personal local consumption only.
 
 > **Note on Cursor:** The cursor provider is a research-only integration built from non-public, reverse-engineered Cursor APIs (`api2.cursor.sh` over HTTP/2, Connect-RPC + protobuf). It may break when Cursor changes client versions, may violate Cursor's terms, and should be used only for local personal experiments.

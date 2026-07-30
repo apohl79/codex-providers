@@ -61,6 +61,12 @@ export interface GeminiConfig {
   "base-url": string;
 }
 
+export interface ModelAdvertisementsConfig {
+  anthropic?: string[];
+  deepseek?: string[];
+  google?: string[];
+}
+
 export type DebugMode = "off" | "errors" | "verbose";
 
 export interface Config {
@@ -77,6 +83,8 @@ export interface Config {
   deepseek?: DeepSeekConfig;
   /** Optional so existing test/config callers remain source-compatible. */
   gemini?: GeminiConfig;
+  /** Optional per-provider model lists for /v1/models advertisements. */
+  "model-advertisements"?: ModelAdvertisementsConfig;
 }
 
 // Raw config shape from YAML (api-keys is an array, not a Set)
@@ -110,8 +118,27 @@ const DEFAULT_RAW: RawConfig = {
     "api-key-env": "GEMINI_API_KEY",
     "base-url": "https://generativelanguage.googleapis.com/v1beta",
   },
+  "model-advertisements": {},
   debug: "off",
 };
+
+function normalizeModelAdvertisements(
+  value: unknown,
+): ModelAdvertisementsConfig {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const configured = value as Record<string, unknown>;
+  return (
+    ["anthropic", "deepseek", "google"] as const
+  ).reduce<ModelAdvertisementsConfig>((advertisements, provider) => {
+    const models = configured[provider];
+    return Array.isArray(models) &&
+      models.every((model) => typeof model === "string")
+      ? { ...advertisements, [provider]: models }
+      : advertisements;
+  }, {});
+}
 
 function normalizeDebugMode(value: unknown): DebugMode {
   if (value === true) return "errors";
@@ -164,6 +191,9 @@ export function loadConfig(configPath?: string): Config {
         ...DEFAULT_RAW.gemini,
         ...(parsed.gemini || {}),
       } as GeminiConfig,
+      "model-advertisements": normalizeModelAdvertisements(
+        parsed["model-advertisements"],
+      ),
     };
   }
 

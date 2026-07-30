@@ -281,7 +281,12 @@ async function startServer(): Promise<void> {
   const config = loadConfig(configPath);
   const authDir = resolveAuthDir(config["auth-dir"]);
 
-  const registry = buildRegistry(authDir, config.deepseek, config.gemini);
+  const registry = buildRegistry(
+    authDir,
+    config.deepseek,
+    config.gemini,
+    config["model-advertisements"],
+  );
   for (const p of registry.all()) p.manager.load();
 
   const totalAccounts = registry
@@ -352,7 +357,12 @@ async function main(): Promise<void> {
     const cursorStorage = args
       .find((a) => a.startsWith("--cursor-storage="))
       ?.split("=", 2)[1];
-    const registry = buildRegistry(authDir, config.deepseek, config.gemini);
+    const registry = buildRegistry(
+      authDir,
+      config.deepseek,
+      config.gemini,
+      config["model-advertisements"],
+    );
     for (const p of registry.all()) p.manager.load();
     if (providerId === "cursor") {
       if (cursorStorage || args.includes("--cursor-import-local")) {

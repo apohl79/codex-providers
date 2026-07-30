@@ -33,6 +33,7 @@ export function makeGeminiApiKeyToken(
 export function buildGeminiProvider(
   authDir: string,
   config?: GeminiConfig,
+  advertisedModels?: string[],
 ): Provider {
   const apiKeyEnv = config?.["api-key-env"] || DEFAULT_API_KEY_ENV;
   const baseUrl = config?.["base-url"] || DEFAULT_BASE_URL;
@@ -55,7 +56,10 @@ export function buildGeminiProvider(
     matchesModel: (model: string) => MODEL_RE.test(model),
     listModels: async () =>
       manager.accountCount > 0
-        ? ADVERTISED_MODELS.map((id) => ({ id, owned_by: "google" }))
+        ? (advertisedModels ?? ADVERTISED_MODELS).map((id) => ({
+            id,
+            owned_by: "google",
+          }))
         : [],
     callMessages: (opts: UpstreamCallContext) =>
       callGeminiGenerateContent({ ...opts, baseUrl }),

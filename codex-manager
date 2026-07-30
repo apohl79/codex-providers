@@ -1097,7 +1097,10 @@ def fetch_models(
         if isinstance(item, dict) and isinstance(item.get("id"), str)
     ]
     if models:
-        return normalize_models(models), f"Fetched {len(models)} {backend.label} models from the local server."
+        return (
+            normalize_models([*models, *backend.fallback_models]),
+            f"Fetched {len(models)} {backend.label} models from the local server.",
+        )
     return list(backend.fallback_models), "Using fallback models; the local server returned no matching models."
 
 
@@ -1471,6 +1474,59 @@ def backup(path: Path) -> Path | None:
     return target
 
 
+def yaml_block_end(lines: list[str], start: int, indent: int) -> int:
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and len(line) - len(line.lstrip()) <= indent:
+            return index
+    return len(lines)
+
+
+def advertised_models_entry(provider_id: str, models: tuple[str, ...]) -> list[str]:
+    return [
+        f"  {provider_id}:",
+        *(f"    - {json.dumps(model)}" for model in models),
+    ]
+
+
+def upsert_model_advertisements(
+    content: str,
+    provider_id: str,
+    models: tuple[str, ...],
+) -> str:
+    lines = content.splitlines()
+    section_start = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == "model-advertisements:" and not line.startswith((" ", "\t"))
+        ),
+        None,
+    )
+    entry = advertised_models_entry(provider_id, models)
+    if section_start is None:
+        prefix = content.rstrip()
+        separator = "\n\n" if prefix else ""
+        return f"{prefix}{separator}model-advertisements:\n" + "\n".join(entry) + "\n"
+
+    section_end = yaml_block_end(lines, section_start, 0)
+    entry_start = next(
+        (
+            index
+            for index in range(section_start + 1, section_end)
+            if re.match(rf"^  {re.escape(provider_id)}:", lines[index])
+        ),
+        None,
+    )
+    if entry_start is None:
+        updated = [*lines[:section_end], *entry, *lines[section_end:]]
+    else:
+        entry_end = yaml_block_end(lines, entry_start, 2)
+        updated = [*lines[:entry_start], *entry, *lines[entry_end:]]
+    return "\n".join(updated).rstrip() + "\n"
+
+
 def write_files(
     draft: Draft,
     codex_config: Path,
@@ -1479,6 +1535,17 @@ def write_files(
     source_catalog: dict,
 ) -> list[Path]:
     agents = agent_definitions(draft, repo_dir)
+    existing_auth2api_config = auth2api_config.read_text() if auth2api_config.exists() else ""
+    next_auth2api_config = upsert_model_advertisements(
+        existing_auth2api_config,
+        draft.backend.auth2api_provider,
+        draft.selected_models,
+    )
+    auth2api_config_backup = (
+        backup(auth2api_config)
+        if next_auth2api_config != existing_auth2api_config
+        else None
+    )
     backups = [
         path
         for path in (
@@ -1486,11 +1553,13 @@ def write_files(
             backup(draft.context_path),
             backup(draft.catalog_path),
             *(backup(agent.path) for agent in agents),
+            auth2api_config_backup,
         )
         if path
     ]
     codex_config.parent.mkdir(parents=True, exist_ok=True)
     draft.context_path.parent.mkdir(parents=True, exist_ok=True)
+    auth2api_config.parent.mkdir(parents=True, exist_ok=True)
     for agent in agents:
         agent.path.parent.mkdir(parents=True, exist_ok=True)
     existing_config = codex_config.read_text() if codex_config.exists() else ""
@@ -1512,11 +1581,13 @@ def write_files(
     codex_config.write_text(next_config)
     draft.context_path.write_text(context_content(draft))
     draft.catalog_path.write_text(json.dumps(catalog, indent=2) + "\n")
+    auth2api_config.write_text(next_auth2api_config)
     for agent in agents:
         agent.path.write_text(agent.content)
     os.chmod(codex_config, 0o600)
     os.chmod(draft.context_path, 0o600)
     os.chmod(draft.catalog_path, 0o600)
+    os.chmod(auth2api_config, 0o600)
     for agent in agents:
         os.chmod(agent.path, 0o600)
     return backups
@@ -2388,6 +2459,7 @@ def main() -> int:
         if not auth_config.api_key:
             print(f"Would create local server API key in: {auth2api_config}")
         print(f"Would update Codex config: {codex_config}")
+        print(f"Would update server model advertisements: {auth2api_config}")
         print(f"Would update context: {draft.context_path}")
         print(f"Would update model catalog: {draft.catalog_path}")
         for agent in agent_definitions(draft, repo_dir):
@@ -2408,6 +2480,7 @@ def main() -> int:
                 print(f"  {path}")
     print(f"Updated Codex provider: {draft.provider_id}")
     print(f"Updated Codex config: {codex_config}")
+    print(f"Updated server model advertisements: {auth2api_config}")
     print(f"Updated context file: {draft.context_path}")
     print(f"Updated model catalog: {draft.catalog_path}")
     print("Updated agent definitions:")

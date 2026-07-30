@@ -56,7 +56,10 @@ export function isAnthropicApiKeyToken(token: TokenData): boolean {
   return token.accountUuid === ANTHROPIC_API_KEY_ACCOUNT_UUID;
 }
 
-export function buildAnthropicProvider(authDir: string): Provider {
+export function buildAnthropicProvider(
+  authDir: string,
+  advertisedModels: string[] | undefined = undefined,
+): Provider {
   const manager = new AccountManager(authDir, {
     provider: "anthropic",
     refresh: async (rt: string): Promise<TokenData> => {
@@ -88,7 +91,10 @@ export function buildAnthropicProvider(authDir: string): Provider {
       return { ...token, provider: "anthropic" };
     },
     listModels: async () =>
-      ADVERTISED_MODELS.map((id) => ({ id, owned_by: "anthropic" })),
+      (advertisedModels ?? ADVERTISED_MODELS).map((id) => ({
+        id,
+        owned_by: "anthropic",
+      })),
     callMessages: (opts: UpstreamCallContext) =>
       isAnthropicApiKeyToken(opts.account.token)
         ? callAnthropicMessagesWithApiKey({

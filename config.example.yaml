@@ -20,6 +20,17 @@ gemini:
   api-key-env: "GEMINI_API_KEY"
   base-url: "https://generativelanguage.googleapis.com/v1beta"
 
+# Optional model lists exposed by GET /v1/models. codex-manager updates the
+# selected provider's list when it writes a Codex profile. Omit this section
+# to advertise each provider's complete built-in catalog.
+model-advertisements:
+  anthropic:
+    - "claude-sonnet-5"
+  deepseek:
+    - "deepseek-v4-flash"
+  google:
+    - "gemini-3.5-flash"
+
 # API keys for client authentication (clients use these to access this proxy)
 api-keys:
   - "your-api-key-here"

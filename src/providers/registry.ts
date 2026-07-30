@@ -1,5 +1,9 @@
 import { ProviderId } from "../auth/types";
-import { DeepSeekConfig, GeminiConfig } from "../config";
+import {
+  DeepSeekConfig,
+  GeminiConfig,
+  ModelAdvertisementsConfig,
+} from "../config";
 import { resolveModel } from "../upstream/translator";
 import { buildAnthropicProvider } from "./anthropic";
 import { buildCodexProvider } from "./codex";
@@ -21,12 +25,24 @@ export function buildRegistry(
   authDir: string,
   deepseekConfig?: DeepSeekConfig,
   geminiConfig?: GeminiConfig,
+  modelAdvertisements?: ModelAdvertisementsConfig,
 ): ProviderRegistry {
-  const anthropic = buildAnthropicProvider(authDir);
+  const anthropic = buildAnthropicProvider(
+    authDir,
+    modelAdvertisements?.anthropic,
+  );
   const codex = buildCodexProvider(authDir);
   const cursor = buildCursorProvider(authDir);
-  const deepseek = buildDeepSeekProvider(authDir, deepseekConfig);
-  const google = buildGeminiProvider(authDir, geminiConfig);
+  const deepseek = buildDeepSeekProvider(
+    authDir,
+    deepseekConfig,
+    modelAdvertisements?.deepseek,
+  );
+  const google = buildGeminiProvider(
+    authDir,
+    geminiConfig,
+    modelAdvertisements?.google,
+  );
   const byId: Record<ProviderId, Provider> = {
     anthropic,
     codex,
