@@ -183,6 +183,13 @@ def load_prompt(repo_dir: Path, backend_key: str) -> str:
     return path.read_text().strip()
 
 
+def load_subagent_prompt(repo_dir: Path, backend_key: str) -> str:
+    extension_path = repo_dir / "docs" / "prompts" / "subagents.md"
+    if not extension_path.exists():
+        raise FileNotFoundError(f"Subagent prompt file not found: {extension_path}")
+    return f"{load_prompt(repo_dir, backend_key)}\n\n{extension_path.read_text().strip()}"
+
+
 GENERAL_AGENT_INSTRUCTIONS = """
 You are Codex, an agent based on GPT-5. You and the user share one workspace, and your job is to collaborate with them until their goal is genuinely handled.
 
@@ -1422,8 +1429,8 @@ def agent_content(name: str, description: str, model_provider: str, model: str, 
 def agent_definitions(draft: Draft, repo_dir: Path) -> tuple[AgentDefinition, ...]:
     agents_dir = draft.context_path.parent / "agents"
     backend_agent_name = sanitize_identifier(draft.backend.key)
-    gpt_prompt = load_prompt(repo_dir, "gpt")
-    backend_prompt = load_prompt(repo_dir, draft.backend.key)
+    gpt_prompt = load_subagent_prompt(repo_dir, "gpt")
+    backend_prompt = load_subagent_prompt(repo_dir, draft.backend.key)
 
     definitions = []
 
