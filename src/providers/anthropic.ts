@@ -30,10 +30,6 @@ const ADVERTISED_MODELS = [
   "claude-fable-5",
   "claude-sonnet-5",
   "claude-haiku-4-5-20251001",
-  "claude-haiku-4-5",
-  "opus",
-  "sonnet",
-  "haiku",
 ];
 
 export function buildAnthropicProvider(authDir: string): Provider {

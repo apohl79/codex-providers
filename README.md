@@ -208,10 +208,6 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 | `claude-fable-5`                                     | anthropic | Claude Fable 5                                     |
 | `claude-sonnet-5`                                    | anthropic | Claude Sonnet 5                                    |
 | `claude-haiku-4-5-20251001`                          | anthropic | Claude Haiku 4.5                                   |
-| `claude-haiku-4-5`                                   | anthropic | Alias for Claude Haiku 4.5                         |
-| `opus`                                               | anthropic | Alias for Claude Opus 4.8                          |
-| `sonnet`                                             | anthropic | Alias for Claude Sonnet 5                          |
-| `haiku`                                              | anthropic | Alias for Claude Haiku 4.5                         |
 | `gpt-5.5`                                            | codex     | GPT-5.5 (reasoning model)                          |
 | `gpt-5.4`                                            | codex     | GPT-5.4                                            |
 | `gpt-5.4-mini`                                       | codex     | GPT-5.4 Mini                                       |
@@ -224,7 +220,7 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 | `cursor-default`                                     | cursor    | Cursor "Auto" model                                |
 | `cursor-premium` / `cursor-fast` / `cursor-composer` | cursor    | Fallback ids when AvailableModels can't be reached |
 
-Short convenience aliases accepted by auth2api:
+Short convenience aliases accepted by auth2api but omitted from `/v1/models`:
 
 - `fable` -> `claude-fable-5`
 - `opus` -> `claude-opus-4-8`
