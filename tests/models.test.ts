@@ -1,0 +1,194 @@
+import assert from "node:assert/strict";
+import { createServer as createHttpServer } from "node:http";
+import { AddressInfo } from "node:net";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import { saveToken } from "../src/auth/token-storage";
+import { ProviderId, TokenData } from "../src/auth/types";
+import { Config } from "../src/config";
+import { buildRegistry } from "../src/providers/registry";
+import { createServer } from "../src/server";
+
+type ModelsResponse = {
+  object: string;
+  data: Array<{
+    id: string;
+    object: string;
+    created: number;
+    owned_by: string;
+  }>;
+};
+
+type ModelsRequestResult = {
+  status: number;
+  body: ModelsResponse | { error: { message: string } };
+};
+
+function makeConfig(authDir: string): Config {
+  return {
+    host: "127.0.0.1",
+    port: 0,
+    "auth-dir": authDir,
+    "api-keys": new Set(["test-key"]),
+    "body-limit": "200mb",
+    cloaking: {
+      "cli-version": "2.1.88",
+      entrypoint: "cli",
+    },
+    timeouts: {
+      "messages-ms": 120000,
+      "stream-messages-ms": 600000,
+      "count-tokens-ms": 30000,
+    },
+    debug: "off",
+  };
+}
+
+function makeToken(provider: ProviderId): TokenData {
+  return {
+    accessToken: `${provider}-access-token`,
+    refreshToken: `${provider}-refresh-token`,
+    email: `${provider}@example.com`,
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    accountUuid: `${provider}-account`,
+    provider,
+  };
+}
+
+async function startProviderCatalogServer(): Promise<{
+  authDir: string;
+  server: ReturnType<typeof createHttpServer>;
+}> {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-models-"));
+  saveToken(authDir, makeToken("anthropic"));
+  saveToken(authDir, makeToken("deepseek"));
+  saveToken(authDir, makeToken("gemini"));
+  const registry = buildRegistry(authDir);
+  registry.all().forEach((provider) => provider.manager.load());
+  const server = createHttpServer(createServer(makeConfig(authDir), registry));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { authDir, server };
+}
+
+function serverUrl(
+  server: ReturnType<typeof createHttpServer>,
+  pathName: string,
+): string {
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Server is not listening on a TCP port");
+  }
+  return `http://127.0.0.1:${(address as AddressInfo).port}${pathName}`;
+}
+
+async function requestModels(
+  server: ReturnType<typeof createHttpServer>,
+  pathName: string,
+): Promise<ModelsRequestResult> {
+  const response = await fetch(serverUrl(server, pathName), {
+    headers: { Authorization: "Bearer test-key" },
+  });
+  return {
+    status: response.status,
+    body: (await response.json()) as ModelsRequestResult["body"],
+  };
+}
+
+async function stopProviderCatalogServer(
+  server: ReturnType<typeof createHttpServer>,
+  authDir: string,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
+  fs.rmSync(authDir, { recursive: true, force: true });
+}
+
+test("filters models by provider", async (t) => {
+  const { authDir, server } = await startProviderCatalogServer();
+  t.after(() => stopProviderCatalogServer(server, authDir));
+
+  const result = await requestModels(server, "/v1/models?provider=deepseek");
+
+  assert.deepEqual(
+    {
+      status: result.status,
+      object: (result.body as ModelsResponse).object,
+      models: (result.body as ModelsResponse).data.map(({ id, owned_by }) => ({
+        id,
+        owned_by,
+      })),
+    },
+    {
+      status: 200,
+      object: "list",
+      models: [
+        { id: "deepseek-v4-pro", owned_by: "deepseek" },
+        { id: "deepseek-v4-flash", owned_by: "deepseek" },
+      ],
+    },
+  );
+});
+
+test("returns an empty catalog for providers without an account", async (t) => {
+  const { authDir, server } = await startProviderCatalogServer();
+  t.after(() => stopProviderCatalogServer(server, authDir));
+
+  const result = await requestModels(server, "/v1/models?provider=codex");
+
+  assert.deepEqual(
+    {
+      status: result.status,
+      object: (result.body as ModelsResponse).object,
+      models: (result.body as ModelsResponse).data,
+    },
+    { status: 200, object: "list", models: [] },
+  );
+});
+
+test("filters Gemini models by provider", async (t) => {
+  const { authDir, server } = await startProviderCatalogServer();
+  t.after(() => stopProviderCatalogServer(server, authDir));
+
+  const result = await requestModels(server, "/v1/models?provider=gemini");
+
+  assert.deepEqual(
+    {
+      status: result.status,
+      object: (result.body as ModelsResponse).object,
+      models: (result.body as ModelsResponse).data.map(({ id, owned_by }) => ({
+        id,
+        owned_by,
+      })),
+    },
+    {
+      status: 200,
+      object: "list",
+      models: [
+        { id: "gemini-3.6-flash", owned_by: "gemini" },
+        { id: "gemini-3.5-flash", owned_by: "gemini" },
+        { id: "gemini-3.1-pro-preview", owned_by: "gemini" },
+        { id: "gemini-3-pro-preview", owned_by: "gemini" },
+      ],
+    },
+  );
+});
+
+test("rejects invalid provider model filters", async (t) => {
+  const { authDir, server } = await startProviderCatalogServer();
+  t.after(() => stopProviderCatalogServer(server, authDir));
+
+  const results = await Promise.all(
+    ["unknown", "anthropic&provider=deepseek"].map((provider) =>
+      requestModels(server, `/v1/models?provider=${provider}`),
+    ),
+  );
+
+  assert.deepEqual(results, [
+    { status: 400, body: { error: { message: "Invalid provider filter" } } },
+    { status: 400, body: { error: { message: "Invalid provider filter" } } },
+  ]);
+});

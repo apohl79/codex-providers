@@ -248,9 +248,23 @@ export function createServer(
 
   app.use("/v1", requireApiKey);
   app.use("/v1", statsFinishMiddleware);
-  app.get("/v1/models", async (_req, res) => {
+  app.get("/v1/models", async (req, res) => {
     const created = Math.floor(Date.now() / 1000);
-    const providers = registry.withAccounts();
+    const requestedProvider = req.query.provider;
+    if (
+      requestedProvider !== undefined &&
+      (typeof requestedProvider !== "string" ||
+        !registry.all().some((provider) => provider.id === requestedProvider))
+    ) {
+      res.status(400).json({ error: { message: "Invalid provider filter" } });
+      return;
+    }
+    const providers = registry
+      .withAccounts()
+      .filter(
+        (provider) =>
+          requestedProvider === undefined || provider.id === requestedProvider,
+      );
     const lists = await Promise.all(providers.map((p) => p.listModels()));
     const data = lists.flatMap((models) =>
       models.map((m) => ({

@@ -21,6 +21,7 @@ except ModuleNotFoundError:  # Python < 3.11
             "codex-manager requires Python 3.11+ or the 'tomli' package for TOML parsing."
         ) from error
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -66,7 +67,6 @@ class Backend:
     provider_aliases: tuple[str, ...]
     display_name: str
     fallback_models: tuple[str, ...]
-    model_prefixes: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -132,7 +132,6 @@ BACKENDS = {
             "claude-haiku-4-5-20251001",
             "claude-haiku-4-5",
         ),
-        model_prefixes=("claude-", "opus-", "sonnet-", "haiku-"),
     ),
     "deepseek": Backend(
         key="deepseek",
@@ -144,7 +143,6 @@ BACKENDS = {
         provider_aliases=("deepseek", "local-deepseek"),
         display_name="DeepSeek",
         fallback_models=("deepseek-v4-pro", "deepseek-v4-flash"),
-        model_prefixes=("deepseek-v4-",),
     ),
     "gemini": Backend(
         key="gemini",
@@ -156,7 +154,6 @@ BACKENDS = {
         provider_aliases=("gemini", "local-gemini"),
         display_name="Gemini",
         fallback_models=("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3-pro-preview"),
-        model_prefixes=("gemini-",),
     ),
 }
 
@@ -1051,10 +1048,6 @@ def build_catalog(
     return {"models": entries}
 
 
-def model_matches_backend(model: str, backend: Backend) -> bool:
-    return any(model.startswith(prefix) for prefix in backend.model_prefixes)
-
-
 def fast_model_for_backend(backend: Backend) -> str:
     if backend.key == "deepseek":
         return DEEPSEEK_FAST_MODEL
@@ -1063,23 +1056,13 @@ def fast_model_for_backend(backend: Backend) -> str:
     return CLAUDE_FAST_MODEL
 
 
-def filter_models(models: list[str], backend: Backend) -> list[str]:
-    seen: set[str] = set()
-    result = []
-    for model in models:
-        normalized = canonical_model(model)
-        if model_matches_backend(normalized, backend) and normalized not in seen:
-            seen.add(normalized)
-            result.append(normalized)
-    return result
-
-
 def fetch_models(
     base_url: str,
     api_key: str | None,
     backend: Backend,
 ) -> tuple[list[str], str]:
-    url = f"{base_url.rstrip('/')}/models"
+    query = urllib.parse.urlencode({"provider": backend.default_provider})
+    url = f"{base_url.rstrip('/')}/models?{query}"
     request = urllib.request.Request(url)
     if api_key:
         request.add_header("Authorization", f"Bearer {api_key}")
@@ -1096,9 +1079,8 @@ def fetch_models(
         for item in data
         if isinstance(item, dict) and isinstance(item.get("id"), str)
     ]
-    filtered = filter_models(models, backend)
-    if filtered:
-        return normalize_models(filtered), f"Fetched {len(filtered)} {backend.label} models from the local server."
+    if models:
+        return normalize_models(models), f"Fetched {len(models)} {backend.label} models from the local server."
     return list(backend.fallback_models), "Using fallback models; the local server returned no matching models."
 
 
@@ -1367,11 +1349,17 @@ def provider_block(draft: Draft, repo_dir: Path, auth2api_config: Path) -> str:
     )
     args = json.dumps(["-e", auth_command])
     prices_toml = _model_prices_toml(draft)
+    auth2api_base_url = normalize_base_url(default_base_url(read_auth2api_config(auth2api_config)))
+    query_params = (
+        f"query_params = {{ provider = {toml_string(draft.backend.default_provider)} }}\n"
+        if draft.base_url == auth2api_base_url
+        else ""
+    )
     return f"""
 [model_providers.{draft.provider_id}]
 name = {toml_string(draft.display_name)}
 base_url = {toml_string(draft.base_url)}
-wire_api = "responses"
+{query_params}wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
 # auth2api's Responses-to-Anthropic bridge forwards flat function/custom tools;
@@ -1996,7 +1984,7 @@ def choose_draft(
     seed_context = existing or source_context
     if seed_context and seed_context.model:
         seed_model = canonical_model(seed_context.model)
-        if model_matches_backend(seed_model, backend) and seed_model not in models:
+        if seed_model not in models:
             models = [seed_model, *models]
 
     selected_indexes = ui.multi_select(

@@ -112,17 +112,19 @@ class DeepSeekBackendTest(unittest.TestCase):
 
         self.assertEqual(config.deepseek_api_key_env, "CUSTOM_DEEPSEEK_KEY")
 
-    def test_deepseek_backend_filters_models_and_uses_flash_fast_model(self) -> None:
+    def test_deepseek_backend_requests_its_catalog_and_uses_flash_fast_model(self) -> None:
         backend = codex_manager.BACKENDS["deepseek"]
 
         self.assertEqual(backend.default_provider, "deepseek")
-        self.assertEqual(
-            codex_manager.filter_models(
-                ["deepseek-v4-pro", "deepseek-v4-flash", "claude-sonnet-5"],
-                backend,
-            ),
-            ["deepseek-v4-pro", "deepseek-v4-flash"],
-        )
+        with patch.object(codex_manager.urllib.request, "urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = (
+                b'{"data":[{"id":"deepseek-v4-pro"},{"id":"custom-model"},{"id":"deepseek-v4-pro"}]}'
+            )
+            models, _ = codex_manager.fetch_models("http://127.0.0.1:8317/v1", "local-key", backend)
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://127.0.0.1:8317/v1/models?provider=deepseek")
+        self.assertEqual(models, ["deepseek-v4-pro", "custom-model"])
         self.assertEqual(codex_manager.fast_model_for_backend(backend), "deepseek-v4-flash")
 
     def test_run_deepseek_login_uses_api_key_provider(self) -> None:
@@ -248,6 +250,7 @@ class DeepSeekBackendTest(unittest.TestCase):
             provider = codex_manager.provider_block(draft, root, root / "config.yaml")
             self.assertIn("[model_providers.deepseek]", provider)
             self.assertIn("namespace_tools = false", provider)
+            self.assertIn('query_params = { provider = "deepseek" }', provider)
 
             claude_provider = codex_manager.provider_block(
                 codex_manager.replace(
@@ -260,6 +263,7 @@ class DeepSeekBackendTest(unittest.TestCase):
                 root / "config.yaml",
             )
             self.assertIn("namespace_tools = false", claude_provider)
+            self.assertIn('query_params = { provider = "anthropic" }', claude_provider)
 
     def test_deepseek_catalog_contains_required_codex_model_fields(self) -> None:
         catalog = codex_manager.build_catalog(
@@ -330,8 +334,20 @@ class GeminiProxyBackendTest(unittest.TestCase):
 
         request = urlopen.call_args.args[0]
         self.assertEqual(
-            (models, request.get_header("X-goog-api-key"), request.get_header("Authorization"), request.get_header("X-api-key")),
-            (["gemini-3.6-flash"], None, "Bearer auth2api-key", "auth2api-key"),
+            (
+                models,
+                request.full_url,
+                request.get_header("X-goog-api-key"),
+                request.get_header("Authorization"),
+                request.get_header("X-api-key"),
+            ),
+            (
+                ["gemini-3.6-flash"],
+                "https://example.test/v1/models?provider=gemini",
+                None,
+                "Bearer auth2api-key",
+                "auth2api-key",
+            ),
         )
 
     def test_gemini_prompt_identifies_gemini(self) -> None:
@@ -435,8 +451,13 @@ class GeminiProxyBackendTest(unittest.TestCase):
         provider = codex_manager.provider_block(draft, Path("/tmp/auth2api"), Path("/tmp/auth2api/config.yaml"))
 
         self.assertEqual(
-            ("base_url = \"http://127.0.0.1:8317/v1\"" in provider, "wire_api = \"responses\"" in provider, "generativelanguage.googleapis.com" in provider),
-            (True, True, False),
+            (
+                "base_url = \"http://127.0.0.1:8317/v1\"" in provider,
+                "query_params = { provider = \"gemini\" }" in provider,
+                "wire_api = \"responses\"" in provider,
+                "generativelanguage.googleapis.com" in provider,
+            ),
+            (True, True, True, False),
         )
 
 
