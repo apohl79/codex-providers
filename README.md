@@ -1,6 +1,6 @@
 # Codex Providers
 
-Codex Providers is a Codex provider manager backed by a lightweight local proxy for Claude (Anthropic), ChatGPT (OpenAI Codex), DeepSeek, Gemini, and experimental local Cursor accounts.
+Codex Providers connects Codex to Claude (Anthropic), ChatGPT (OpenAI Codex), DeepSeek, Gemini, and experimental local Cursor accounts through generated provider profiles and a lightweight local proxy.
 
 This project started as a fork of [auth2api](https://github.com/AmazingAng/auth2api). It now focuses on configuring third-party model providers for the [apohl79 Codex fork](https://github.com/apohl79/codex) and managing the local proxy they use.
 
@@ -29,7 +29,7 @@ Requires Node.js 20+.
 
 ```bash
 git clone https://github.com/apohl79/codex-providers
-cd codex-providers && git checkout main-fork
+cd codex-providers
 ./install.sh
 
 # Interactive provider setup (Claude by default)
