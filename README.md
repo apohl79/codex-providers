@@ -1,6 +1,6 @@
 # Codex Providers
 
-Codex Providers connects Codex to Claude (Anthropic), ChatGPT (OpenAI Codex), DeepSeek, Gemini, and experimental local Cursor accounts through generated provider profiles and a lightweight local proxy.
+Codex Providers connects Codex to Claude (Anthropic), DeepSeek, and Gemini through generated provider profiles and a lightweight local proxy.
 
 This project started as a fork of [auth2api](https://github.com/AmazingAng/auth2api). It now focuses on configuring third-party model providers for the [apohl79 Codex fork](https://github.com/apohl79/codex) and managing the local proxy they use.
 
