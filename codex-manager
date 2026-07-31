@@ -183,11 +183,11 @@ def load_prompt(repo_dir: Path, backend_key: str) -> str:
     return path.read_text().strip()
 
 
-def load_subagent_prompt(repo_dir: Path, backend_key: str) -> str:
+def load_subagent_prompt(repo_dir: Path) -> str:
     extension_path = repo_dir / "docs" / "prompts" / "subagents.md"
     if not extension_path.exists():
         raise FileNotFoundError(f"Subagent prompt file not found: {extension_path}")
-    return f"{load_prompt(repo_dir, backend_key)}\n\n{extension_path.read_text().strip()}"
+    return extension_path.read_text().strip()
 
 
 GENERAL_AGENT_INSTRUCTIONS = """
@@ -1430,8 +1430,7 @@ def agent_content(name: str, description: str, model_provider: str, model: str, 
 def agent_definitions(draft: Draft, repo_dir: Path) -> tuple[AgentDefinition, ...]:
     agents_dir = draft.context_path.parent / "agents"
     backend_agent_name = sanitize_identifier(draft.backend.key)
-    gpt_prompt = load_subagent_prompt(repo_dir, "gpt")
-    backend_prompt = load_subagent_prompt(repo_dir, draft.backend.key)
+    subagent_prompt = load_subagent_prompt(repo_dir)
 
     definitions = []
 
@@ -1445,7 +1444,7 @@ def agent_definitions(draft: Draft, repo_dir: Path) -> tuple[AgentDefinition, ..
                     f"General-purpose OpenAI-backed agent using provider openai and model {OPENAI_GENERAL_AGENT_MODEL}.",
                     "openai",
                     OPENAI_GENERAL_AGENT_MODEL,
-                    gpt_prompt,
+                    subagent_prompt,
                 ),
             ),
         )
@@ -1458,7 +1457,7 @@ def agent_definitions(draft: Draft, repo_dir: Path) -> tuple[AgentDefinition, ..
                 f"General-purpose {draft.backend.label}-backed agent using provider {draft.provider_id} and model {draft.default_model}.",
                 draft.provider_id,
                 draft.default_model,
-                backend_prompt,
+                subagent_prompt,
             ),
         ),
     )

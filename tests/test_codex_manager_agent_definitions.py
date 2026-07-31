@@ -25,8 +25,6 @@ class AgentDefinitionsTest(unittest.TestCase):
     def _write_prompts(self, root: Path, include_subagents: bool = True) -> None:
         prompts = root / "docs" / "prompts"
         prompts.mkdir(parents=True)
-        (prompts / "gpt.md").write_text("GPT base prompt")
-        (prompts / "claude.md").write_text("Claude base prompt")
         if include_subagents:
             (prompts / "subagents.md").write_text("Shared sub-agent instructions")
 
@@ -50,7 +48,7 @@ class AgentDefinitionsTest(unittest.TestCase):
             False,
         )
 
-    def test_missing_gpt_config_extends_gpt_and_backend_agent_prompts(self) -> None:
+    def test_missing_gpt_config_uses_only_shared_subagent_instructions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self._write_prompts(root)
@@ -69,16 +67,16 @@ class AgentDefinitionsTest(unittest.TestCase):
             [
                 (
                     "general-purpose-gpt.toml",
-                    "GPT base prompt\n\nShared sub-agent instructions",
+                    "Shared sub-agent instructions",
                 ),
                 (
                     "general-purpose-claude.toml",
-                    "Claude base prompt\n\nShared sub-agent instructions",
+                    "Shared sub-agent instructions",
                 ),
             ],
         )
 
-    def test_existing_gpt_config_extends_only_the_backend_agent_prompt(self) -> None:
+    def test_existing_gpt_config_uses_only_shared_subagent_instructions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self._write_prompts(root)
@@ -100,7 +98,7 @@ class AgentDefinitionsTest(unittest.TestCase):
             [
                 (
                     "general-purpose-claude.toml",
-                    "Claude base prompt\n\nShared sub-agent instructions",
+                    "Shared sub-agent instructions",
                 ),
             ],
         )

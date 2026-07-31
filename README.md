@@ -34,7 +34,7 @@ codex -p gemini
 
 - **Codex integration** — `codex-manager` curses wizard writes all Codex config files (`~/.codex/*.config.toml`, model catalogs, agent definitions) for Claude, DeepSeek, Gemini, and GPT backends. Generated Gemini profiles use auth2api's local Responses endpoint; its setup securely prompts for a missing Gemini API key and saves it in auth-dir. Non-interactive mode available (`--yes`).
 - **Fixed translation layer** — the upstream OpenAI→Anthropic translator didn't handle Codex's wire format correctly: Claude models broke on tool calls and structured output, DeepSeek's Anthropic-compatible endpoint was untested. Both are now working, including streaming, reasoning, tool use, and image passthrough (for providers that support it).
-- **Per-backend system prompts** — `docs/prompts/{gpt,claude,deepseek,gemini}.md` load as `base_instructions` in generated model catalogs. Generated agent TOML files extend the matching model prompt with `docs/prompts/subagents.md`. Edit the markdown directly to customize behavior. `--update-models-cache` syncs `gpt.md` into `~/.codex/models_cache.json` and GPT pricing into `config.toml`.
+- **Per-backend system prompts** — `docs/prompts/{gpt,claude,deepseek,gemini}.md` load as `base_instructions` in generated model catalogs. Generated agent TOML files use only `docs/prompts/subagents.md` as `developer_instructions`. Edit the markdown directly to customize behavior. `--update-models-cache` syncs `gpt.md` into `~/.codex/models_cache.json` and GPT pricing into `config.toml`.
 - **Codex-optimized prompts** — each prompt is tuned for the apohl79 Codex fork: GPT gets the full collaborative thought-partner style with CommonMark and visualization guidance. Claude gets outcome-first terseness, zero-comment policy, no compat hacks, OWASP security awareness. DeepSeek gets the GPT baseline plus explicit vision-unsupported notice.
 - **Claude, DeepSeek & Gemini routing** — current Claude model defaults (`claude-opus-4-8`, `claude-fable-5`, `claude-sonnet-5`, `claude-haiku-4-5`). DeepSeek profiles use the text-only configuration required by its Anthropic API. Gemini models use the native GenerateContent API behind auth2api's Responses adapter. Claude Code `[1m]` suffix handling and Responses custom-tool compatibility cover freeform tools such as `apply_patch`.
 - **Lightweight by design** — small codebase, minimal moving parts
@@ -356,7 +356,7 @@ See [Fork Features](#fork-features-apohl79main-fork) above for quick start, non-
 - `~/.codex/config.toml` — provider block and MultiAgentV2 settings
 - `~/.codex/{claude,deepseek}.config.toml` — context with model, fast model, catalog path, context window
 - `~/.codex/{claude,deepseek}-models.json` — model catalog with backend-specific `base_instructions` from `docs/prompts/`
-- `~/.codex/agents/general-purpose-{gpt,claude,deepseek,gemini}.toml` — agent definitions with the matching model prompt plus `docs/prompts/subagents.md`
+- `~/.codex/agents/general-purpose-{gpt,claude,deepseek,gemini}.toml` — agent definitions whose `developer_instructions` contain only `docs/prompts/subagents.md`
 
 ### Codex config for sub-agents and cross-provider calls
 
@@ -438,15 +438,15 @@ Reasoning level choices in the wizard:
 
 ### System prompts
 
-`codex-manager` reads backend-specific system prompts from `docs/prompts/` and writes them into generated Codex model catalogs. Agent definitions extend the matching model prompt with the shared sub-agent instructions:
+`codex-manager` reads backend-specific system prompts from `docs/prompts/` and writes them into generated Codex model catalogs. Generated agent definitions use only the shared sub-agent instructions:
 
 | File | Backend | Purpose |
 | ---- | ------- | ------- |
-| `docs/prompts/gpt.md` | OpenAI (GPT) | Used for `gpt-5.6-*` model entries and the `general-purpose-gpt` agent |
-| `docs/prompts/claude.md` | Anthropic (Claude) | Used for Claude model entries and the `general-purpose-claude` agent |
-| `docs/prompts/deepseek.md` | DeepSeek | Used for DeepSeek model entries and the `general-purpose-deepseek` agent |
-| `docs/prompts/gemini.md` | Gemini | Used for Gemini model entries and the `general-purpose-gemini` agent |
-| `docs/prompts/subagents.md` | All sub-agents | Appended only to generated `general-purpose-*` agent instructions |
+| `docs/prompts/gpt.md` | OpenAI (GPT) | Used for `gpt-5.6-*` model entries |
+| `docs/prompts/claude.md` | Anthropic (Claude) | Used for Claude model entries |
+| `docs/prompts/deepseek.md` | DeepSeek | Used for DeepSeek model entries |
+| `docs/prompts/gemini.md` | Gemini | Used for Gemini model entries |
+| `docs/prompts/subagents.md` | All sub-agents | Sole content of generated `general-purpose-*` agent `developer_instructions` |
 
 The model prompts share the same Codex tool discipline (task completion, autonomy tiers, repository work, destructive action safeguards, git hygiene) but differ in communication style and emphasis:
 
