@@ -2,7 +2,7 @@ host: ""
 port: 8317
 
 # Directory to store provider credentials
-auth-dir: "~/.auth2api"
+auth-dir: "~/.codex-providers"
 
 # Claude accepts either OAuth or an Anthropic API key. Set ANTHROPIC_API_KEY
 # for non-interactive startup, or save it with --login --auth=api-key.
@@ -20,7 +20,7 @@ gemini:
   api-key-env: "GEMINI_API_KEY"
   base-url: "https://generativelanguage.googleapis.com/v1beta"
 
-# Optional model lists exposed by GET /v1/models. codex-manager updates the
+# Optional model lists exposed by GET /v1/models. codex-providers updates the
 # selected provider's list when it writes a Codex profile. Omit this section
 # to advertise each provider's complete built-in catalog.
 model-advertisements:

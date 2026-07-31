@@ -18,7 +18,7 @@ except ModuleNotFoundError:  # Python < 3.11
         import tomli as tomllib
     except ModuleNotFoundError as error:
         raise SystemExit(
-            "codex-manager requires Python 3.11+ or the 'tomli' package for TOML parsing."
+            "codex-providers requires Python 3.11+ or the 'tomli' package for TOML parsing."
         ) from error
 import urllib.error
 import urllib.parse
@@ -408,7 +408,7 @@ def unquote(value: str) -> str:
 def read_auth2api_config(path: Path) -> Auth2ApiConfig:
     host = "127.0.0.1"
     port = 8317
-    auth_dir = "~/.auth2api"
+    auth_dir = "~/.codex-providers"
     api_key: str | None = None
     deepseek_api_key_env = "DEEPSEEK_API_KEY"
     gemini_api_key_env = "GEMINI_API_KEY"
@@ -623,7 +623,7 @@ def ensure_api_key(config_path: Path, dry_run: bool) -> tuple[Auth2ApiConfig, li
 
     api_key = f"sk-{secrets.token_hex(32)}"
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    existing = config_path.read_text() if config_path.exists() else "host: ''\nport: 8317\nauth-dir: ~/.auth2api\n"
+    existing = config_path.read_text() if config_path.exists() else "host: ''\nport: 8317\nauth-dir: ~/.codex-providers\n"
     backup_path = backup(config_path)
     config_path.write_text(insert_api_key(existing, api_key))
     os.chmod(config_path, 0o600)
@@ -1468,7 +1468,7 @@ def agent_definitions(draft: Draft, repo_dir: Path) -> tuple[AgentDefinition, ..
 def backup(path: Path) -> Path | None:
     if not path.exists():
         return None
-    target = path.with_name(f"{path.name}.bak-codex-manager-{time.strftime('%Y%m%d%H%M%S')}")
+    target = path.with_name(f"{path.name}.bak-codex-providers-{time.strftime('%Y%m%d%H%M%S')}")
     shutil.copy2(path, target)
     return target
 
@@ -1901,7 +1901,7 @@ def ensure_backend_login(
             return
         if not interactive_tty:
             raise SystemExit(
-                f"Error: no Gemini credential found in {auth_dir}. Run codex-manager from a terminal, set {auth_config.gemini_api_key_env}, or pass --skip-login-check."
+                f"Error: no Gemini credential found in {auth_dir}. Run codex-providers from a terminal, set {auth_config.gemini_api_key_env}, or pass --skip-login-check."
             )
         print(f"No Gemini credential found in {auth_dir}. Enter a Gemini API key to configure auth2api.")
         run_google_login(repo_dir, auth2api_config_path)
@@ -1949,7 +1949,7 @@ def ensure_backend_login(
     if args.yes:
         if not interactive_tty:
             raise SystemExit(
-                f"Error: no {backend.label} credential found in {auth_dir}. Run codex-manager from a terminal, set {credential_env}, or pass --skip-login-check."
+                f"Error: no {backend.label} credential found in {auth_dir}. Run codex-providers from a terminal, set {credential_env}, or pass --skip-login-check."
             )
         print(f"No {backend.label} credential found in {auth_dir}. Starting {backend.label} login.")
         if backend.key == "deepseek":
@@ -1979,7 +1979,7 @@ def ensure_backend_login(
             )
     else:
         raise SystemExit(
-            f"Error: no {backend.label} credential found in {auth_dir}. Run codex-manager from a terminal, set {credential_env}, or pass --skip-login-check."
+            f"Error: no {backend.label} credential found in {auth_dir}. Run codex-providers from a terminal, set {credential_env}, or pass --skip-login-check."
         )
 
     if backend.key == "deepseek":
@@ -2317,7 +2317,7 @@ def update_models_cache(repo_dir: Path) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="codex-manager", description="Manage Codex contexts.")
+    parser = argparse.ArgumentParser(prog="codex-providers", description="Configure Codex providers.")
     parser.add_argument(
         "--preset",
         choices=tuple(BACKENDS),

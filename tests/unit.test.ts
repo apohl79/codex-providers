@@ -382,9 +382,9 @@ test("isDebugLevel returns correct values", () => {
 });
 
 test("resolveAuthDir expands tilde", () => {
-  const result = resolveAuthDir("~/.auth2api");
+  const result = resolveAuthDir("~/.codex-providers");
   assert.ok(!result.startsWith("~"));
-  assert.ok(result.endsWith(".auth2api"));
+  assert.ok(result.endsWith(".codex-providers"));
 });
 
 test("resolveAuthDir resolves relative paths", () => {

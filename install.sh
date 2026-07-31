@@ -2,25 +2,28 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUNNER_NAME="${AUTH2API_RUNNER_NAME:-auth2api}"
-ZSHRC_PATH="${AUTH2API_ZSHRC_PATH:-$HOME/.zshrc}"
-ZSHRC_BEGIN="# >>> auth2api ensure >>>"
-ZSHRC_END="# <<< auth2api ensure <<<"
+RUNNER_NAME="${CODEX_PROVIDERS_RUNNER_NAME:-codex-providers}"
+ZSHRC_PATH="${CODEX_PROVIDERS_ZSHRC_PATH:-$HOME/.zshrc}"
+ZSHRC_BEGIN="# >>> codex-providers proxy ensure >>>"
+ZSHRC_END="# <<< codex-providers proxy ensure <<<"
+LEGACY_RUNNER_NAME="auth2api"
+LEGACY_ZSHRC_BEGIN="# >>> auth2api ensure >>>"
+LEGACY_ZSHRC_END="# <<< auth2api ensure <<<"
 UNINSTALL=0
 
 usage() {
   cat <<USAGE
 Usage: ./install.sh [options]
 
-Installs the auth2api runner and enables auth2api ensure from ~/.zshrc.
+Installs codex-providers and enables its proxy ensure hook from ~/.zshrc.
 
 Options:
-  --uninstall  Remove the installed runner and managed ~/.zshrc ensure block.
+  --uninstall  Remove codex-providers and its managed ~/.zshrc ensure block.
   -h, --help   Show this help.
 
 Environment:
-  AUTH2API_RUNNER_NAME  Runner name. Default: auth2api
-  AUTH2API_ZSHRC_PATH   zshrc path. Default: ~/.zshrc
+  CODEX_PROVIDERS_RUNNER_NAME  Runner name. Default: codex-providers
+  CODEX_PROVIDERS_ZSHRC_PATH   zshrc path. Default: ~/.zshrc
 USAGE
 }
 
@@ -42,6 +45,11 @@ while (($#)); do
   shift
 done
 
+if [[ "$RUNNER_NAME" == "$LEGACY_RUNNER_NAME" ]]; then
+  echo "Error: auth2api is no longer a supported runner name; use codex-providers." >&2
+  exit 2
+fi
+
 if [[ -d "$HOME/bin" ]]; then
   BIN_DIR="$HOME/bin"
 else
@@ -52,16 +60,18 @@ fi
 RUNNER_PATH="$BIN_DIR/$RUNNER_NAME"
 
 runner_paths() {
-  printf '%s\n' "$HOME/bin/$RUNNER_NAME" "$HOME/.local/bin/$RUNNER_NAME" |
+  local runner_name="$1"
+  printf '%s\n' "$HOME/bin/$runner_name" "$HOME/.local/bin/$runner_name" |
     awk '!seen[$0]++'
 }
 
 remove_zshrc_block() {
+  local begin="$1" end="$2"
   [[ -f "$ZSHRC_PATH" ]] || return 1
 
   local tmp_path
   tmp_path="$(mktemp)"
-  awk -v begin="$ZSHRC_BEGIN" -v end="$ZSHRC_END" '
+  awk -v begin="$begin" -v end="$end" '
     $0 == begin { skip = 1; changed = 1; next }
     $0 == end { skip = 0; next }
     !skip { print }
@@ -85,39 +95,58 @@ install_zshrc_block() {
   zshrc_dir="$(dirname "$ZSHRC_PATH")"
   mkdir -p "$zshrc_dir"
 
-  remove_zshrc_block || true
+  remove_zshrc_block "$ZSHRC_BEGIN" "$ZSHRC_END" || true
   runner_relative_path="${RUNNER_PATH#"$HOME"/}"
   quoted_runner_relative_path="$(quote_shell_value "$runner_relative_path")"
 
   {
     printf '\n%s\n' "$ZSHRC_BEGIN"
-    printf 'AUTH2API_RUNNER_PATH="$HOME"/%s\n' "$quoted_runner_relative_path"
-    printf '%s\n' "if [[ -x \"\$AUTH2API_RUNNER_PATH\" ]]; then"
-    printf '%s\n' "  \"\$AUTH2API_RUNNER_PATH\" ensure >/dev/null 2>&1 || true"
+    printf 'CODEX_PROVIDERS_RUNNER_PATH="$HOME"/%s\n' "$quoted_runner_relative_path"
+    printf '%s\n' "if [[ -x \"\$CODEX_PROVIDERS_RUNNER_PATH\" ]]; then"
+    printf '%s\n' "  \"\$CODEX_PROVIDERS_RUNNER_PATH\" proxy ensure >/dev/null 2>&1 || true"
     printf 'fi\n'
-    printf 'unset AUTH2API_RUNNER_PATH\n'
+    printf 'unset CODEX_PROVIDERS_RUNNER_PATH\n'
     printf '%s\n' "$ZSHRC_END"
   } >>"$ZSHRC_PATH"
+}
+
+is_legacy_runner() {
+  local runner_path="$1" repo_literal
+  repo_literal="$(printf '%q' "$SCRIPT_DIR")"
+  [[ -f "$runner_path" ]] && grep -Fq "REPO_DIR=$repo_literal" "$runner_path"
+}
+
+remove_legacy_installation() {
+  local runner_path
+
+  remove_zshrc_block "$LEGACY_ZSHRC_BEGIN" "$LEGACY_ZSHRC_END" || true
+
+  while IFS= read -r runner_path; do
+    if is_legacy_runner "$runner_path"; then
+      rm -f "$runner_path"
+      echo "Removed legacy auth2api runner: $runner_path"
+    fi
+  done < <(runner_paths "$LEGACY_RUNNER_NAME")
 }
 
 uninstall() {
   local removed=0 runner_path
 
-  if remove_zshrc_block; then
-    echo "Removed auth2api ensure block from $ZSHRC_PATH"
+  if remove_zshrc_block "$ZSHRC_BEGIN" "$ZSHRC_END"; then
+    echo "Removed codex-providers proxy ensure block from $ZSHRC_PATH"
     removed=1
   fi
 
   while IFS= read -r runner_path; do
     if [[ -e "$runner_path" ]]; then
       rm -f "$runner_path"
-      echo "Removed auth2api runner: $runner_path"
+      echo "Removed codex-providers runner: $runner_path"
       removed=1
     fi
-  done < <(runner_paths)
+  done < <(runner_paths "$RUNNER_NAME")
 
   if [[ "$removed" -eq 0 ]]; then
-    echo "No auth2api runner or zshrc ensure block found."
+    echo "No codex-providers runner or zshrc proxy ensure block found."
   fi
 }
 
@@ -126,30 +155,41 @@ if [[ "$UNINSTALL" -eq 1 ]]; then
   exit 0
 fi
 
+remove_legacy_installation
+
 cat >"$RUNNER_PATH" <<'RUNNER'
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR=__AUTH2API_REPO_DIR__
+REPO_DIR=__CODEX_PROVIDERS_REPO_DIR__
+MANAGER_PATH="$REPO_DIR/codex-providers"
 CONFIG_PATH="${AUTH2API_CONFIG_PATH:-$REPO_DIR/config.yaml}"
-LOG_DIR="${AUTH2API_LOG_DIR:-$HOME/.local/state/auth2api}"
-PID_FILE="${AUTH2API_PID_FILE:-$LOG_DIR/server.pid}"
+LOG_DIR="${CODEX_PROVIDERS_LOG_DIR:-$HOME/.local/state/codex-providers}"
+PID_FILE="${CODEX_PROVIDERS_PID_FILE:-$LOG_DIR/server.pid}"
+LEGACY_STATE_DIR="$HOME/.local/state/auth2api"
+LEGACY_PID_FILE="$LEGACY_STATE_DIR/server.pid"
 
 usage() {
   cat <<USAGE
-Usage: auth2api [ensure|start|stop|--login|<auth2api args>]
+Usage: codex-providers <command> [arguments]
 
 Commands:
-  ensure   Start auth2api in the background unless its health endpoint is ready.
-  start    Run auth2api in the foreground.
-  stop     Stop the background auth2api process started by this runner.
+  setup [args]               Run the interactive provider setup wizard.
+  configure <provider> [args]
+                             Configure Claude, DeepSeek, or Gemini.
+  proxy ensure               Start the local proxy unless its health endpoint is ready.
+  proxy start                Run the local proxy in the foreground.
+  proxy stop                 Stop the background proxy process started by this runner.
+  proxy logs                 Print the background proxy log.
+  doctor                     Report whether the local proxy health endpoint is ready.
 
-All other arguments are passed to node dist/index.js with this repo's config.yaml.
+Run without arguments to start provider setup. Pass setup --help to see wizard options.
 
 Environment:
-  AUTH2API_CONFIG_PATH  Config file path. Default: <repo>/config.yaml
-  AUTH2API_LOG_DIR      Background server log directory. Default: ~/.local/state/auth2api
-  AUTH2API_PID_FILE     Background server PID file. Default: <log-dir>/server.pid
+  AUTH2API_CONFIG_PATH         Proxy config file path. Default: <repo>/config.yaml
+  CODEX_PROVIDERS_LOG_DIR      Background proxy log directory. Default: ~/.local/state/codex-providers
+  CODEX_PROVIDERS_PID_FILE     Background proxy PID file. Default: <log-dir>/server.pid
+  CODEX_PROVIDERS_LOG_LINES    Lines printed by proxy logs. Default: 200
 USAGE
 }
 
@@ -287,16 +327,21 @@ is_live_process() {
 }
 
 stop_server() {
-  if [[ ! -f "$PID_FILE" ]]; then
-    echo "No managed auth2api process found."
+  local pid_file="$PID_FILE"
+  if [[ ! -f "$pid_file" && "$pid_file" != "$LEGACY_PID_FILE" && -f "$LEGACY_PID_FILE" ]]; then
+    pid_file="$LEGACY_PID_FILE"
+  fi
+
+  if [[ ! -f "$pid_file" ]]; then
+    echo "No managed proxy process found."
     return 0
   fi
 
   local pid command
-  pid="$(tr -d '[:space:]' <"$PID_FILE")"
+  pid="$(tr -d '[:space:]' <"$pid_file")"
   if ! [[ "$pid" =~ ^[1-9][0-9]*$ ]] || ! is_live_process "$pid"; then
-    rm -f "$PID_FILE"
-    echo "Removed stale auth2api PID file."
+    rm -f "$pid_file"
+    echo "Removed stale proxy PID file."
     return 0
   fi
 
@@ -304,21 +349,21 @@ stop_server() {
   if [[ "$command" != node\ * && "$command" != */node\ * ]] || \
     [[ "$command" != *"$REPO_DIR/dist/index.js"* ]] || \
     [[ "$command" != *"--config=$CONFIG_PATH"* ]]; then
-    echo "Error: refusing to stop PID $pid because it is not this runner's auth2api process." >&2
+    echo "Error: refusing to stop PID $pid because it is not this runner's proxy process." >&2
     return 1
   fi
 
   kill -TERM "$pid"
   for _ in $(seq 1 50); do
     if ! is_live_process "$pid"; then
-      rm -f "$PID_FILE"
-      echo "Stopped auth2api (PID $pid)."
+      rm -f "$pid_file"
+      echo "Stopped proxy (PID $pid)."
       return 0
     fi
     sleep 0.2
   done
 
-  echo "Error: auth2api (PID $pid) did not stop after SIGTERM." >&2
+  echo "Error: proxy (PID $pid) did not stop after SIGTERM." >&2
   return 1
 }
 
@@ -356,28 +401,117 @@ run_foreground() {
   exec node "$REPO_DIR/dist/index.js" "--config=$CONFIG_PATH" "$@"
 }
 
+show_logs() {
+  local log_file="$LOG_DIR/server.log"
+  if [[ ! -f "$log_file" && -f "$LEGACY_STATE_DIR/server.log" ]]; then
+    log_file="$LEGACY_STATE_DIR/server.log"
+  fi
+  if [[ ! -f "$log_file" ]]; then
+    echo "No proxy log file found at $log_file"
+    return 0
+  fi
+  tail -n "${CODEX_PROVIDERS_LOG_LINES:-200}" "$log_file"
+}
+
+doctor() {
+  require_command curl
+
+  local url
+  url="$(health_url)"
+  if is_running "$url"; then
+    echo "Proxy is healthy: $url"
+    return 0
+  fi
+
+  echo "Proxy is unavailable: $url" >&2
+  return 1
+}
+
+run_setup() {
+  require_command python3
+  exec python3 "$MANAGER_PATH" "$@"
+}
+
+run_proxy() {
+  local command="${1:-}"
+  shift || true
+
+  case "$command" in
+    ensure)
+      if (($#)); then
+        echo "Error: proxy ensure does not accept additional arguments." >&2
+        exit 2
+      fi
+      ensure_server
+      ;;
+    start)
+      run_foreground "$@"
+      ;;
+    stop)
+      if (($#)); then
+        echo "Error: proxy stop does not accept additional arguments." >&2
+        exit 2
+      fi
+      stop_server
+      ;;
+    logs)
+      if (($#)); then
+        echo "Error: proxy logs does not accept additional arguments." >&2
+        exit 2
+      fi
+      show_logs
+      ;;
+    "" | -h | --help | help)
+      usage
+      ;;
+    *)
+      echo "Error: unknown proxy command: $command" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
 case "${1:-}" in
-  ensure)
-    shift
-    ensure_server "$@"
-    ;;
-  start)
-    shift
-    run_foreground "$@"
-    ;;
-  stop)
-    shift
+  "" | setup)
     if (($#)); then
-      echo "Error: stop does not accept additional arguments." >&2
+      shift
+    fi
+    run_setup "$@"
+    ;;
+  configure)
+    shift
+    if (($# == 0)); then
+      echo "Error: configure requires a provider." >&2
+      usage >&2
       exit 2
     fi
-    stop_server
+    provider="$1"
+    shift
+    run_setup --preset "$provider" "$@"
+    ;;
+  proxy)
+    shift
+    run_proxy "$@"
+    ;;
+  doctor)
+    shift
+    if (($#)); then
+      echo "Error: doctor does not accept additional arguments." >&2
+      exit 2
+    fi
+    doctor
     ;;
   -h | --help | help)
     usage
     ;;
+  -*)
+    run_setup "$@"
+    ;;
   *)
-    run_foreground "$@"
+    echo "Error: unknown command: $1" >&2
+    usage >&2
+    exit 2
     ;;
 esac
 RUNNER
@@ -387,17 +521,18 @@ repo_replacement="${repo_literal//\\/\\\\}"
 repo_replacement="${repo_replacement//&/\\&}"
 repo_replacement="${repo_replacement//|/\\|}"
 
-sed -i.bak "s|__AUTH2API_REPO_DIR__|$repo_replacement|g" "$RUNNER_PATH"
+sed -i.bak "s|__CODEX_PROVIDERS_REPO_DIR__|$repo_replacement|g" "$RUNNER_PATH"
 rm -f "$RUNNER_PATH.bak"
 chmod 755 "$RUNNER_PATH"
 install_zshrc_block
 
 cat <<EOF
-Installed auth2api runner: $RUNNER_PATH
-Installed auth2api ensure hook: $ZSHRC_PATH
+Installed codex-providers: $RUNNER_PATH
+Installed codex-providers proxy ensure hook: $ZSHRC_PATH
 
 Use:
-  $RUNNER_PATH ensure
+  $RUNNER_PATH setup
+  $RUNNER_PATH proxy ensure
 
 Uninstall:
   $SCRIPT_DIR/install.sh --uninstall

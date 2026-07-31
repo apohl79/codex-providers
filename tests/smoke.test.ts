@@ -1170,7 +1170,7 @@ test("loadConfig converts YAML api-keys array to Set", () => {
     [
       'host: "127.0.0.1"',
       "port: 9999",
-      'auth-dir: "~/.auth2api"',
+      'auth-dir: "~/.codex-providers"',
       "api-keys:",
       '  - "sk-key-one"',
       '  - "sk-key-two"',

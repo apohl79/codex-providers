@@ -99,7 +99,7 @@ node dist/index.js
 host: "" # 绑定地址，空字符串表示 127.0.0.1
 port: 8317
 
-auth-dir: "~/.auth2api" # OAuth token 存储目录
+auth-dir: "~/.codex-providers" # OAuth token 存储目录
 
 api-keys:
   - "your-api-key-here" # 客户端使用这个 key 访问代理
@@ -251,7 +251,7 @@ docker build -t auth2api .
 # 运行（挂载配置文件与 token 目录）
 docker run -d \
   -p 8317:8317 \
-  -v ~/.auth2api:/data \
+  -v ~/.codex-providers:/data \
   -v ./config.yaml:/config/config.yaml \
   auth2api
 ```

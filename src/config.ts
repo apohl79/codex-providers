@@ -95,7 +95,7 @@ interface RawConfig extends Omit<Config, "api-keys"> {
 const DEFAULT_RAW: RawConfig = {
   host: "",
   port: 8317,
-  "auth-dir": "~/.auth2api",
+  "auth-dir": "~/.codex-providers",
   "api-keys": [],
   "body-limit": "200mb",
   cloaking: {

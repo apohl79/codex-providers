@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "codex-manager"
+MODULE_PATH = Path(__file__).resolve().parents[1] / "codex-providers"
 LOADER = importlib.machinery.SourceFileLoader("codex_manager_missing_key", str(MODULE_PATH))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 if SPEC is None:

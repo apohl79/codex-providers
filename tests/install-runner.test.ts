@@ -9,15 +9,15 @@ const REPO_DIR = path.resolve(__dirname, "..");
 const INSTALLER_PATH = path.join(REPO_DIR, "install.sh");
 
 function installRunner(homeDir: string): string {
-  const runnerName = "auth2api-test";
+  const runnerName = "codex-providers-test";
   const result = spawnSync("bash", [INSTALLER_PATH], {
     cwd: REPO_DIR,
     encoding: "utf8",
     env: {
       ...process.env,
       HOME: homeDir,
-      AUTH2API_RUNNER_NAME: runnerName,
-      AUTH2API_ZSHRC_PATH: path.join(homeDir, ".zshrc"),
+      CODEX_PROVIDERS_RUNNER_NAME: runnerName,
+      CODEX_PROVIDERS_ZSHRC_PATH: path.join(homeDir, ".zshrc"),
     },
   });
   assert.deepEqual(
@@ -28,10 +28,10 @@ function installRunner(homeDir: string): string {
 }
 
 function runRunner(runnerPath: string, pidFile: string) {
-  return spawnSync(runnerPath, ["stop"], {
+  return spawnSync(runnerPath, ["proxy", "stop"], {
     cwd: REPO_DIR,
     encoding: "utf8",
-    env: { ...process.env, AUTH2API_PID_FILE: pidFile },
+    env: { ...process.env, HOME: path.dirname(pidFile), CODEX_PROVIDERS_PID_FILE: pidFile },
   });
 }
 
@@ -54,8 +54,65 @@ function testHome(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-test("installed runner stop succeeds when no managed process exists", (t) => {
-  const homeDir = testHome("auth2api-runner-empty-");
+test("installed codex-providers dispatches setup and configure to the wizard", (t) => {
+  const homeDir = testHome("codex-providers-dispatch-");
+  const runnerPath = installRunner(homeDir);
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+
+  const setupResult = spawnSync(runnerPath, ["setup", "--help"], {
+    cwd: REPO_DIR,
+    encoding: "utf8",
+    env: process.env,
+  });
+  const configureResult = spawnSync(runnerPath, ["configure", "gemini", "--help"], {
+    cwd: REPO_DIR,
+    encoding: "utf8",
+    env: process.env,
+  });
+
+  assert.deepEqual(
+    {
+      setupStatus: setupResult.status,
+      configureStatus: configureResult.status,
+      setupUsage: setupResult.stdout.includes("usage: codex-providers"),
+      configureUsage: configureResult.stdout.includes("usage: codex-providers"),
+    },
+    { setupStatus: 0, configureStatus: 0, setupUsage: true, configureUsage: true },
+  );
+});
+
+test("installer removes this repository's legacy auth2api runner and shell hook", (t) => {
+  const homeDir = testHome("codex-providers-migration-");
+  const legacyRunnerPath = path.join(homeDir, ".local", "bin", "auth2api");
+  fs.mkdirSync(path.dirname(legacyRunnerPath), { recursive: true });
+  fs.writeFileSync(legacyRunnerPath, `REPO_DIR=${REPO_DIR}\n`);
+  fs.writeFileSync(
+    path.join(homeDir, ".zshrc"),
+    "# >>> auth2api ensure >>>\nlegacy\n# <<< auth2api ensure <<<\n",
+  );
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+
+  const runnerPath = installRunner(homeDir);
+  const zshrc = fs.readFileSync(path.join(homeDir, ".zshrc"), "utf8");
+
+  assert.deepEqual(
+    {
+      runnerExists: fs.existsSync(runnerPath),
+      legacyRunnerExists: fs.existsSync(legacyRunnerPath),
+      containsLegacyHook: zshrc.includes("auth2api ensure"),
+      containsNewHook: zshrc.includes("codex-providers proxy ensure"),
+    },
+    {
+      runnerExists: true,
+      legacyRunnerExists: false,
+      containsLegacyHook: false,
+      containsNewHook: true,
+    },
+  );
+});
+
+test("codex-providers proxy stop succeeds when no managed process exists", (t) => {
+  const homeDir = testHome("codex-providers-runner-empty-");
   const runnerPath = installRunner(homeDir);
   const pidFile = path.join(homeDir, "server.pid");
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
@@ -64,12 +121,12 @@ test("installed runner stop succeeds when no managed process exists", (t) => {
 
   assert.deepEqual(
     { status: result.status, stdout: result.stdout, pidFileExists: fs.existsSync(pidFile) },
-    { status: 0, stdout: "No managed auth2api process found.\n", pidFileExists: false },
+    { status: 0, stdout: "No managed proxy process found.\n", pidFileExists: false },
   );
 });
 
-test("installed runner stop removes malformed PID state without signalling", (t) => {
-  const homeDir = testHome("auth2api-runner-malformed-");
+test("codex-providers proxy stop removes malformed PID state without signalling", (t) => {
+  const homeDir = testHome("codex-providers-runner-malformed-");
   const runnerPath = installRunner(homeDir);
   const pidFile = path.join(homeDir, "server.pid");
   fs.writeFileSync(pidFile, "not-a-pid\n");
@@ -79,12 +136,12 @@ test("installed runner stop removes malformed PID state without signalling", (t)
 
   assert.deepEqual(
     { status: result.status, stdout: result.stdout, pidFileExists: fs.existsSync(pidFile) },
-    { status: 0, stdout: "Removed stale auth2api PID file.\n", pidFileExists: false },
+    { status: 0, stdout: "Removed stale proxy PID file.\n", pidFileExists: false },
   );
 });
 
-test("installed runner stop refuses an unrelated live process", (t) => {
-  const homeDir = testHome("auth2api-runner-unowned-");
+test("codex-providers proxy stop refuses an unrelated live process", (t) => {
+  const homeDir = testHome("codex-providers-runner-unowned-");
   const runnerPath = installRunner(homeDir);
   const pidFile = path.join(homeDir, "server.pid");
   const foreignProcess = spawn(process.execPath, ["-e", "setInterval(() => {}, 60_000)"]);
@@ -107,8 +164,8 @@ test("installed runner stop refuses an unrelated live process", (t) => {
   );
 });
 
-test("installed runner stop terminates the process recorded by the runner", (t) => {
-  const homeDir = testHome("auth2api-runner-owned-");
+test("codex-providers proxy stop terminates the process recorded by the runner", (t) => {
+  const homeDir = testHome("codex-providers-runner-owned-");
   const runnerPath = installRunner(homeDir);
   const configPath = path.join(homeDir, "config.yaml");
   const pidFile = path.join(homeDir, "server.pid");
@@ -125,13 +182,13 @@ test("installed runner stop terminates the process recorded by the runner", (t) 
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  const result = spawnSync(runnerPath, ["stop"], {
+  const result = spawnSync(runnerPath, ["proxy", "stop"], {
     cwd: REPO_DIR,
     encoding: "utf8",
     env: {
       ...process.env,
       AUTH2API_CONFIG_PATH: configPath,
-      AUTH2API_PID_FILE: pidFile,
+      CODEX_PROVIDERS_PID_FILE: pidFile,
     },
   });
 
@@ -140,6 +197,37 @@ test("installed runner stop terminates the process recorded by the runner", (t) 
       status: result.status,
       pidFileExists: fs.existsSync(pidFile),
     },
+    { status: 0, pidFileExists: false },
+  );
+});
+
+test("codex-providers proxy stop accepts the legacy managed PID during migration", (t) => {
+  const homeDir = testHome("codex-providers-runner-legacy-pid-");
+  const runnerPath = installRunner(homeDir);
+  const configPath = path.join(homeDir, "config.yaml");
+  const legacyPidFile = path.join(homeDir, ".local", "state", "auth2api", "server.pid");
+  fs.mkdirSync(path.dirname(legacyPidFile), { recursive: true });
+  const managedProcess = spawn(process.execPath, [
+    "-e",
+    "setInterval(() => {}, 60_000)",
+    path.join(REPO_DIR, "dist", "index.js"),
+    `--config=${configPath}`,
+  ]);
+  const managedPid = processPid(managedProcess);
+  fs.writeFileSync(legacyPidFile, `${managedPid}\n`);
+  t.after(() => {
+    managedProcess.kill();
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  const result = spawnSync(runnerPath, ["proxy", "stop"], {
+    cwd: REPO_DIR,
+    encoding: "utf8",
+    env: { ...process.env, HOME: homeDir, AUTH2API_CONFIG_PATH: configPath },
+  });
+
+  assert.deepEqual(
+    { status: result.status, pidFileExists: fs.existsSync(legacyPidFile) },
     { status: 0, pidFileExists: false },
   );
 });

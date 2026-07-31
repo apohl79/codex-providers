@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import io
 import subprocess
 import sys
 import tempfile
@@ -10,7 +11,7 @@ from pathlib import Path
 from unittest.mock import call, patch
 
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "codex-manager"
+MODULE_PATH = Path(__file__).resolve().parents[1] / "codex-providers"
 LOADER = importlib.machinery.SourceFileLoader("codex_manager", str(MODULE_PATH))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 if SPEC is None:
@@ -103,14 +104,17 @@ class DeepSeekBackendTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config_path = Path(directory) / "config.yaml"
             config_path.write_text(
-                "auth-dir: ~/.auth2api\n"
+                "auth-dir: ~/.custom-auth-dir\n"
                 "deepseek:\n"
                 "  api-key-env: CUSTOM_DEEPSEEK_KEY\n"
                 "  base-url: https://api.deepseek.com/anthropic\n"
             )
             config = codex_manager.read_auth2api_config(config_path)
 
-        self.assertEqual(config.deepseek_api_key_env, "CUSTOM_DEEPSEEK_KEY")
+        self.assertEqual(
+            (config.auth_dir, config.deepseek_api_key_env),
+            ("~/.custom-auth-dir", "CUSTOM_DEEPSEEK_KEY"),
+        )
 
     def test_deepseek_backend_requests_its_catalog_and_uses_flash_fast_model(self) -> None:
         backend = codex_manager.BACKENDS["deepseek"]
@@ -308,6 +312,14 @@ class DeepSeekBackendTest(unittest.TestCase):
         self.assertEqual(catalog["models"][0]["tool_mode"], "direct")
 
 
+class CredentialDirectoryDefaultTest(unittest.TestCase):
+    def test_missing_config_uses_codex_providers_credential_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = codex_manager.read_auth2api_config(Path(directory) / "missing.yaml")
+
+        self.assertEqual(config.auth_dir, "~/.codex-providers")
+
+
 class ClaudeOpus5SupportTest(unittest.TestCase):
     def test_claude_fallback_and_alias_include_opus_5(self) -> None:
         backend = codex_manager.BACKENDS["claude"]
@@ -437,7 +449,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
                         codex_manager.Auth2ApiConfig(
                             "127.0.0.1",
                             8317,
-                            "~/.auth2api",
+                            "~/.codex-providers",
                             "auth2api-key",
                             "DEEPSEEK_API_KEY",
                         ),
@@ -599,6 +611,20 @@ class ProviderMenuTest(unittest.TestCase):
             ["Keep current limits", "1M context", "Recommended context", "Small context", "Tiny context"],
         )
         self.assertFalse(any("Claude" in text for item in choices for text in item))
+
+
+class CommandLineIdentityTest(unittest.TestCase):
+    def test_help_uses_the_codex_providers_command_name(self) -> None:
+        output = io.StringIO()
+        with (
+            patch.object(sys, "argv", ["codex-providers", "--help"]),
+            patch.object(sys, "stdout", output),
+            self.assertRaises(SystemExit) as error,
+        ):
+            codex_manager.parse_args()
+
+        self.assertEqual(error.exception.code, 0)
+        self.assertIn("usage: codex-providers", output.getvalue())
 
 
 class FastModelSelectionTest(unittest.TestCase):

@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "codex-manager"
+MODULE_PATH = Path(__file__).resolve().parents[1] / "codex-providers"
 LOADER = importlib.machinery.SourceFileLoader("codex_manager", str(MODULE_PATH))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 if SPEC is None:
@@ -76,7 +76,7 @@ class ClaudeApiKeyLoginTest(unittest.TestCase):
         auth_config = codex_manager.Auth2ApiConfig(
             host="127.0.0.1",
             port=8317,
-            auth_dir="~/.auth2api",
+            auth_dir="~/.codex-providers",
             api_key="local-key",
             deepseek_api_key_env="DEEPSEEK_API_KEY",
         )
@@ -153,7 +153,7 @@ class ClaudeApiKeyLoginTest(unittest.TestCase):
 
     def test_managing_claude_can_replace_existing_oauth_with_api_key(self) -> None:
         args = type("Args", (), {"skip_login_check": False, "dry_run": False, "yes": False, "manual_login": False})()
-        auth_config = codex_manager.Auth2ApiConfig("127.0.0.1", 8317, "~/.auth2api", "local-key", "DEEPSEEK_API_KEY")
+        auth_config = codex_manager.Auth2ApiConfig("127.0.0.1", 8317, "~/.codex-providers", "local-key", "DEEPSEEK_API_KEY")
 
         with tempfile.TemporaryDirectory() as directory:
             auth_dir = Path(directory)
@@ -191,7 +191,7 @@ class ClaudeApiKeyLoginTest(unittest.TestCase):
 
     def test_managing_claude_can_replace_existing_api_key_with_oauth(self) -> None:
         args = type("Args", (), {"skip_login_check": False, "dry_run": False, "yes": False, "manual_login": False})()
-        auth_config = codex_manager.Auth2ApiConfig("127.0.0.1", 8317, "~/.auth2api", "local-key", "DEEPSEEK_API_KEY")
+        auth_config = codex_manager.Auth2ApiConfig("127.0.0.1", 8317, "~/.codex-providers", "local-key", "DEEPSEEK_API_KEY")
 
         with tempfile.TemporaryDirectory() as directory:
             auth_dir = Path(directory)
@@ -229,7 +229,7 @@ class ClaudeApiKeyLoginTest(unittest.TestCase):
 
     def test_managing_claude_can_keep_existing_authentication(self) -> None:
         args = type("Args", (), {"skip_login_check": False, "dry_run": False, "yes": False, "manual_login": False})()
-        auth_config = codex_manager.Auth2ApiConfig("127.0.0.1", 8317, "~/.auth2api", "local-key", "DEEPSEEK_API_KEY")
+        auth_config = codex_manager.Auth2ApiConfig("127.0.0.1", 8317, "~/.codex-providers", "local-key", "DEEPSEEK_API_KEY")
 
         with tempfile.TemporaryDirectory() as directory:
             with (
