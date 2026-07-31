@@ -12,34 +12,6 @@ import {
 } from "./handlers/anthropic";
 import { StatsRecorder } from "./stats/recorder";
 
-// Simple in-memory rate limiter per IP
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT_MAX = 60;
-
-function rateLimit(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return true;
-  }
-  entry.count++;
-  return entry.count <= RATE_LIMIT_MAX;
-}
-
-// Cleanup stale entries every 5 minutes
-const cleanupTimer = setInterval(
-  () => {
-    const now = Date.now();
-    for (const [ip, entry] of rateLimitMap) {
-      if (now > entry.resetAt) rateLimitMap.delete(ip);
-    }
-  },
-  5 * 60 * 1000,
-);
-cleanupTimer.unref();
-
 export function createServer(
   config: Config,
   registry: ProviderRegistry,
@@ -76,16 +48,6 @@ export function createServer(
     );
     if (_req.method === "OPTIONS") {
       res.sendStatus(204);
-      return;
-    }
-    next();
-  });
-
-  // Rate limiting middleware
-  app.use("/v1", (req, res, next) => {
-    const ip = req.ip || req.socket.remoteAddress || "unknown";
-    if (!rateLimit(ip)) {
-      res.status(429).json({ error: { message: "Too many requests" } });
       return;
     }
     next();

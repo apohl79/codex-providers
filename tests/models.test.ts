@@ -184,6 +184,22 @@ test("filters Gemini models by provider", async (t) => {
   );
 });
 
+test("serves more than sixty authenticated model catalog requests", async (t) => {
+  const { authDir, server } = await startProviderCatalogServer();
+  t.after(() => stopProviderCatalogServer(server, authDir));
+
+  const results = await Promise.all(
+    Array.from({ length: 61 }, () =>
+      requestModels(server, "/v1/models?provider=google"),
+    ),
+  );
+
+  assert.deepEqual(
+    results.map((result) => result.status),
+    Array.from({ length: 61 }, () => 200),
+  );
+});
+
 test("advertises only the selected models for each managed provider", async (t) => {
   const { authDir, server } = await startProviderCatalogServer({
     anthropic: ["claude-sonnet-5"],
