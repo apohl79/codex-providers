@@ -125,6 +125,22 @@ const NATIVE_WEATHER_RESPONSE = {
   usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 3 },
 };
 
+const NATIVE_THOUGHT_SIGNATURE_RESPONSE = {
+  candidates: [
+    {
+      content: {
+        parts: [
+          {
+            functionCall: { name: "exec_command", args: { cmd: "pwd" } },
+            thoughtSignature: "opaque-thought-signature",
+          },
+        ],
+      },
+      finishReason: "STOP",
+    },
+  ],
+};
+
 const EXPECTED_WEATHER_CONTENTS = [
   { role: "user", parts: [{ text: "Check Berlin weather" }] },
   {
@@ -276,6 +292,59 @@ test("Gemini adapter translates Responses tools and function-call history", () =
   assert.equal(response.output[1].name, "weather");
   assert.equal(response.output[1].arguments, '{"city":"Berlin"}');
   assert.equal(response.usage.total_tokens, 10);
+});
+
+test("Gemini adapter restores thought signatures for replayed function calls", () => {
+  const response = geminiToResponses(
+    NATIVE_THOUGHT_SIGNATURE_RESPONSE,
+    "gemini-3.6-flash",
+  );
+  const functionCall = response.output[0];
+  const request = responsesToGeminiGenerateContent({
+    model: "gemini-3.6-flash",
+    input: [
+      { role: "user", content: "Show the working directory." },
+      {
+        type: "function_call",
+        call_id: functionCall.call_id,
+        name: functionCall.name,
+        arguments: functionCall.arguments,
+      },
+      {
+        type: "function_call_output",
+        call_id: functionCall.call_id,
+        output: "/workspace",
+      },
+    ],
+  });
+
+  assert.deepEqual(functionCall.extra_content, {
+    google: { thought_signature: "opaque-thought-signature" },
+  });
+  assert.equal(functionCall.thought_signature, "opaque-thought-signature");
+  assert.deepEqual(request.contents, [
+    { role: "user", parts: [{ text: "Show the working directory." }] },
+    {
+      role: "model",
+      parts: [
+        {
+          functionCall: { name: "exec_command", args: { cmd: "pwd" } },
+          thoughtSignature: "opaque-thought-signature",
+        },
+      ],
+    },
+    {
+      role: "user",
+      parts: [
+        {
+          functionResponse: {
+            name: "exec_command",
+            response: { output: "/workspace" },
+          },
+        },
+      ],
+    },
+  ]);
 });
 
 test("Gemini adapter removes unsupported additionalProperties from nested tool schemas", () => {

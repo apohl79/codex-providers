@@ -2,9 +2,39 @@ import { v4 as uuidv4 } from "uuid";
 import { UsageData } from "../accounts/manager";
 
 const CUSTOM_TOOL_NAME = "apply_patch";
+const MAX_THOUGHT_SIGNATURES = 4096;
+const thoughtSignatures = new Map<string, string>();
 
 function compactUuid(): string {
   return uuidv4().replace(/-/g, "");
+}
+
+function rememberThoughtSignature(
+  callId: string,
+  thoughtSignature: string,
+): void {
+  thoughtSignatures.set(callId, thoughtSignature);
+  if (thoughtSignatures.size > MAX_THOUGHT_SIGNATURES) {
+    const oldestCallId = thoughtSignatures.keys().next().value;
+    if (typeof oldestCallId === "string")
+      thoughtSignatures.delete(oldestCallId);
+  }
+}
+
+function thoughtSignatureForItem(item: any): string {
+  if (typeof item?.thought_signature === "string") {
+    return item.thought_signature;
+  }
+  if (typeof item?.extra_content?.google?.thought_signature === "string") {
+    return item.extra_content.google.thought_signature;
+  }
+  const callId =
+    typeof item?.call_id === "string"
+      ? item.call_id
+      : typeof item?.id === "string"
+        ? item.id
+        : "";
+  return callId ? thoughtSignatures.get(callId) || "" : "";
 }
 
 function outputText(content: unknown): string {
@@ -77,12 +107,14 @@ function responseToolParts(item: any): Record<string, unknown>[] {
     } catch {
       args = {};
     }
+    const thoughtSignature = thoughtSignatureForItem(item);
     return [
       {
         functionCall: {
           name: item.name || "tool",
           args,
         },
+        ...(thoughtSignature ? { thoughtSignature } : {}),
       },
     ];
   }
@@ -285,9 +317,25 @@ function responseStatus(finishReason: unknown): string {
   return finishReason === "MAX_TOKENS" ? "incomplete" : "completed";
 }
 
-function functionCallItem(call: any): Record<string, unknown> {
+function functionCallItem(
+  call: any,
+  partThoughtSignature: unknown = "",
+): Record<string, unknown> {
   const callId = `call_${compactUuid().slice(0, 24)}`;
   const args = JSON.stringify(call?.args || {});
+  const thoughtSignature =
+    typeof partThoughtSignature === "string"
+      ? partThoughtSignature
+      : typeof call?.thoughtSignature === "string"
+        ? call.thoughtSignature
+        : "";
+  if (thoughtSignature) rememberThoughtSignature(callId, thoughtSignature);
+  const signatureMetadata = thoughtSignature
+    ? {
+        thought_signature: thoughtSignature,
+        extra_content: { google: { thought_signature: thoughtSignature } },
+      }
+    : {};
   if (call?.name === CUSTOM_TOOL_NAME) {
     const parsed = call.args?.input;
     return {
@@ -297,6 +345,7 @@ function functionCallItem(call: any): Record<string, unknown> {
       call_id: callId,
       name: call.name,
       input: typeof parsed === "string" ? parsed : args,
+      ...signatureMetadata,
     };
   }
   return {
@@ -306,6 +355,7 @@ function functionCallItem(call: any): Record<string, unknown> {
     call_id: callId,
     name: call?.name || "tool",
     arguments: args,
+    ...signatureMetadata,
   };
 }
 
@@ -341,7 +391,9 @@ export function geminiToResponses(response: any, model: string): any {
       : []),
     ...parts
       .filter((part: any) => part?.functionCall)
-      .map((part: any) => functionCallItem(part.functionCall)),
+      .map((part: any) =>
+        functionCallItem(part.functionCall, part.thoughtSignature),
+      ),
   ];
   const usage = geminiUsageMetadata(response);
   return {
@@ -447,8 +499,8 @@ function textStartEvents(state: GeminiResponsesState): string[] {
   ];
 }
 
-function functionCallEvents(state: GeminiResponsesState, call: any): string[] {
-  const item = functionCallItem(call);
+function functionCallEvents(state: GeminiResponsesState, part: any): string[] {
+  const item = functionCallItem(part?.functionCall, part?.thoughtSignature);
   const outputIndex = state.nextOutputIndex;
   state.nextOutputIndex += 1;
   const custom = item.type === "custom_tool_call";
@@ -527,8 +579,7 @@ export function geminiSSEToResponses(
     );
   }
   for (const part of parts) {
-    if (part?.functionCall)
-      output.push(...functionCallEvents(state, part.functionCall));
+    if (part?.functionCall) output.push(...functionCallEvents(state, part));
   }
   return output;
 }
