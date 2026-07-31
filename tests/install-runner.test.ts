@@ -3,6 +3,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 const REPO_DIR = path.resolve(__dirname, "..");
@@ -53,6 +54,132 @@ function processPid(childProcess: ChildProcess): number {
 function testHome(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
+
+function runGit(cwd: string, args: string[]): void {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  assert.deepEqual({ status: result.status, stderr: result.stderr }, { status: 0, stderr: "" });
+}
+
+function createInstallerRepository(rootDir: string): string {
+  const repositoryDir = path.join(rootDir, "installer-source");
+  fs.mkdirSync(path.join(repositoryDir, "src"), { recursive: true });
+  ["install.sh", "codex-providers", "package.json"].forEach((name) =>
+    fs.copyFileSync(path.join(REPO_DIR, name), path.join(repositoryDir, name)),
+  );
+  fs.writeFileSync(path.join(repositoryDir, "src", ".keep"), "");
+  runGit(repositoryDir, ["init", "--initial-branch=main"]);
+  runGit(repositoryDir, ["config", "user.name", "Installer Test"]);
+  runGit(repositoryDir, ["config", "user.email", "installer@example.com"]);
+  runGit(repositoryDir, ["add", "."]);
+  runGit(repositoryDir, [
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--no-verify",
+    "-m",
+    "installer fixture",
+  ]);
+  return repositoryDir;
+}
+
+function streamInstaller(
+  homeDir: string,
+  callerDir: string,
+  repositoryDir: string,
+  managedDir: string,
+) {
+  return spawnSync("bash", [], {
+    cwd: callerDir,
+    encoding: "utf8",
+    input: fs.readFileSync(INSTALLER_PATH, "utf8"),
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      CODEX_PROVIDERS_MANAGED_DIR: managedDir,
+      CODEX_PROVIDERS_REPO_URL: pathToFileURL(repositoryDir).href,
+      CODEX_PROVIDERS_RUNNER_NAME: "codex-providers-test",
+      CODEX_PROVIDERS_ZSHRC_PATH: path.join(homeDir, ".zshrc"),
+    },
+  });
+}
+
+test("streamed installer bootstraps and reuses a managed checkout", (t) => {
+  const rootDir = testHome("codex-providers-streamed-install-");
+  const homeDir = path.join(rootDir, "home");
+  const callerDir = path.join(rootDir, "caller with spaces");
+  const managedDir = path.join(rootDir, "managed checkout");
+  const repositoryDir = createInstallerRepository(rootDir);
+  fs.mkdirSync(callerDir);
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+
+  const firstInstall = streamInstaller(homeDir, callerDir, repositoryDir, managedDir);
+  fs.writeFileSync(path.join(repositoryDir, "fixture-version.txt"), "updated\n");
+  runGit(repositoryDir, ["add", "fixture-version.txt"]);
+  runGit(repositoryDir, [
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--no-verify",
+    "-m",
+    "update fixture",
+  ]);
+  const secondInstall = streamInstaller(homeDir, callerDir, repositoryDir, managedDir);
+  const runnerPath = path.join(homeDir, ".local", "bin", "codex-providers-test");
+  const setupResult = spawnSync(runnerPath, ["setup", "--help"], {
+    cwd: callerDir,
+    encoding: "utf8",
+    env: process.env,
+  });
+
+  assert.deepEqual(
+    {
+      firstStatus: firstInstall.status,
+      firstStderr: firstInstall.stderr,
+      secondStatus: secondInstall.status,
+      secondStderr: secondInstall.stderr,
+      managedInstallerExists: fs.existsSync(path.join(managedDir, "install.sh")),
+      managedVersion: fs.readFileSync(path.join(managedDir, "fixture-version.txt"), "utf8"),
+      setupStatus: setupResult.status,
+      setupError: setupResult.error?.message ?? "",
+      setupUsage: setupResult.stdout?.includes("usage: codex-providers") ?? false,
+    },
+    {
+      firstStatus: 0,
+      firstStderr: "",
+      secondStatus: 0,
+      secondStderr: "",
+      managedInstallerExists: true,
+      managedVersion: "updated\n",
+      setupStatus: 0,
+      setupError: "",
+      setupUsage: true,
+    },
+  );
+});
+
+test("streamed installer refuses to overwrite a non-Git managed path", (t) => {
+  const rootDir = testHome("codex-providers-streamed-conflict-");
+  const homeDir = path.join(rootDir, "home");
+  const callerDir = path.join(rootDir, "caller");
+  const managedDir = path.join(rootDir, "managed");
+  const markerPath = path.join(managedDir, "keep.txt");
+  const repositoryDir = createInstallerRepository(rootDir);
+  fs.mkdirSync(callerDir);
+  fs.mkdirSync(managedDir);
+  fs.writeFileSync(markerPath, "keep\n");
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+
+  const result = streamInstaller(homeDir, callerDir, repositoryDir, managedDir);
+
+  assert.deepEqual(
+    {
+      status: result.status,
+      refusedManagedPath: result.stderr.includes("is not a Git checkout"),
+      marker: fs.readFileSync(markerPath, "utf8"),
+    },
+    { status: 1, refusedManagedPath: true, marker: "keep\n" },
+  );
+});
 
 test("installed codex-providers dispatches setup and configure to the wizard", (t) => {
   const homeDir = testHome("codex-providers-dispatch-");

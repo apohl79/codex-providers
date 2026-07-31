@@ -25,12 +25,10 @@ This project started as a fork of [auth2api](https://github.com/AmazingAng/auth2
 
 ## Install and configure
 
-Requires Node.js 20+.
+Requires Node.js 20+, npm, Git, and curl.
 
 ```bash
-git clone https://github.com/apohl79/codex-providers
-cd codex-providers
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/apohl79/codex-providers/main/install.sh | bash
 
 # Interactive provider setup (Claude by default)
 codex-providers setup
@@ -43,6 +41,8 @@ codex -p deepseek
 codex-providers configure gemini
 codex -p gemini
 ```
+
+The installer keeps its managed source checkout under `~/.local/share/codex-providers` and updates it on subsequent runs.
 
 ## Everyday commands
 

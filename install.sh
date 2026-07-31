@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+if [[ -n "$SCRIPT_SOURCE" && -f "$SCRIPT_SOURCE" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+else
+  SCRIPT_DIR="$(pwd)"
+fi
+
+ORIGINAL_ARGS=("$@")
 RUNNER_NAME="${CODEX_PROVIDERS_RUNNER_NAME:-codex-providers}"
 ZSHRC_PATH="${CODEX_PROVIDERS_ZSHRC_PATH:-$HOME/.zshrc}"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+MANAGED_DIR="${CODEX_PROVIDERS_MANAGED_DIR:-$DATA_HOME/codex-providers}"
+REPO_URL="${CODEX_PROVIDERS_REPO_URL:-https://github.com/apohl79/codex-providers.git}"
+REPO_BRANCH="${CODEX_PROVIDERS_REPO_BRANCH:-main}"
 ZSHRC_BEGIN="# >>> codex-providers proxy ensure >>>"
 ZSHRC_END="# <<< codex-providers proxy ensure <<<"
 LEGACY_RUNNER_NAME="auth2api"
@@ -13,7 +24,7 @@ UNINSTALL=0
 
 usage() {
   cat <<USAGE
-Usage: ./install.sh [options]
+Usage: install.sh [options]
 
 Installs codex-providers and enables its proxy ensure hook from ~/.zshrc.
 
@@ -22,6 +33,10 @@ Options:
   -h, --help   Show this help.
 
 Environment:
+  CODEX_PROVIDERS_MANAGED_DIR  Source checkout for streamed installs.
+                               Default: ~/.local/share/codex-providers
+  CODEX_PROVIDERS_REPO_URL     Git repository cloned by streamed installs.
+  CODEX_PROVIDERS_REPO_BRANCH  Git branch used by streamed installs. Default: main
   CODEX_PROVIDERS_RUNNER_NAME  Runner name. Default: codex-providers
   CODEX_PROVIDERS_ZSHRC_PATH   zshrc path. Default: ~/.zshrc
 USAGE
@@ -44,6 +59,79 @@ while (($#)); do
   esac
   shift
 done
+
+repository_checkout_is_complete() {
+  local repository_dir="$1"
+  [[ -f "$repository_dir/install.sh" ]] &&
+    [[ -f "$repository_dir/codex-providers" ]] &&
+    [[ -f "$repository_dir/package.json" ]] &&
+    [[ -d "$repository_dir/src" ]]
+}
+
+validate_bootstrap_settings() {
+  if [[ -z "$REPO_URL" || "$REPO_URL" == -* ]]; then
+    echo "Error: invalid CODEX_PROVIDERS_REPO_URL: $REPO_URL" >&2
+    exit 1
+  fi
+  if [[ ! "$REPO_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+    [[ "$REPO_BRANCH" == -* ]] ||
+    [[ "$REPO_BRANCH" == *".."* ]]; then
+    echo "Error: invalid CODEX_PROVIDERS_REPO_BRANCH: $REPO_BRANCH" >&2
+    exit 1
+  fi
+}
+
+bootstrap_managed_checkout() {
+  command -v git >/dev/null 2>&1 || {
+    echo "Error: git is required for a streamed installation." >&2
+    exit 1
+  }
+  validate_bootstrap_settings
+
+  if [[ -e "$MANAGED_DIR" ]]; then
+    if [[ ! -d "$MANAGED_DIR/.git" ]]; then
+      echo "Error: managed install path $MANAGED_DIR is not a Git checkout; refusing to overwrite it." >&2
+      exit 1
+    fi
+
+    local current_url
+    current_url="$(git -C "$MANAGED_DIR" remote get-url origin 2>/dev/null || true)"
+    if [[ "$current_url" != "$REPO_URL" ]]; then
+      echo "Error: managed checkout origin is $current_url, expected $REPO_URL." >&2
+      exit 1
+    fi
+
+    echo "Updating managed codex-providers checkout: $MANAGED_DIR"
+    git -C "$MANAGED_DIR" fetch --quiet origin "$REPO_BRANCH"
+    git -C "$MANAGED_DIR" merge --ff-only --quiet FETCH_HEAD
+  else
+    local managed_parent temporary_checkout
+    managed_parent="$(dirname "$MANAGED_DIR")"
+    mkdir -p "$managed_parent"
+    temporary_checkout="$(mktemp -d "$managed_parent/.codex-providers.XXXXXX")"
+    trap 'rm -rf "$temporary_checkout"' EXIT
+
+    echo "Installing managed codex-providers checkout: $MANAGED_DIR"
+    git clone --quiet --branch "$REPO_BRANCH" --single-branch "$REPO_URL" "$temporary_checkout"
+    mv "$temporary_checkout" "$MANAGED_DIR"
+    temporary_checkout=""
+    trap - EXIT
+  fi
+
+  if ! repository_checkout_is_complete "$MANAGED_DIR"; then
+    echo "Error: managed checkout is missing required codex-providers files: $MANAGED_DIR" >&2
+    exit 1
+  fi
+
+  if (( ${#ORIGINAL_ARGS[@]} )); then
+    exec bash "$MANAGED_DIR/install.sh" "${ORIGINAL_ARGS[@]}"
+  fi
+  exec bash "$MANAGED_DIR/install.sh"
+}
+
+if [[ "$UNINSTALL" -eq 0 ]] && ! repository_checkout_is_complete "$SCRIPT_DIR"; then
+  bootstrap_managed_checkout
+fi
 
 if [[ "$RUNNER_NAME" == "$LEGACY_RUNNER_NAME" ]]; then
   echo "Error: auth2api is no longer a supported runner name; use codex-providers." >&2

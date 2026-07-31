@@ -72,12 +72,12 @@ node dist/index.js
 
 The server starts on `http://127.0.0.1:8317` by default. On first run, an API key is auto-generated and saved to `config.yaml`.
 
-### Runner install
+### Installer and runner
 
-The repo includes `install.sh`, which writes `codex-providers` to `~/bin` when that directory exists, otherwise to `~/.local/bin`. It also adds a managed block to `~/.zshrc` that runs `codex-providers proxy ensure` when a new zsh shell starts. Installation removes this repository's previous `auth2api` runner and hook; no compatibility command is retained.
+The one-line installer clones the project into `$XDG_DATA_HOME/codex-providers` when `XDG_DATA_HOME` is set, otherwise into `~/.local/share/codex-providers`. It then writes `codex-providers` to `~/bin` when that directory exists, otherwise to `~/.local/bin`. Re-running the installer fast-forwards the managed checkout before reinstalling the command. It also adds a managed block to `~/.zshrc` that runs `codex-providers proxy ensure` when a new zsh shell starts. Installation removes this repository's previous `auth2api` runner and hook; no compatibility command is retained.
 
 ```bash
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/apohl79/codex-providers/main/install.sh | bash
 codex-providers setup
 codex-providers proxy ensure
 codex-providers proxy stop
@@ -85,12 +85,14 @@ codex-providers proxy logs
 codex-providers doctor
 ```
 
+Set `CODEX_PROVIDERS_MANAGED_DIR` to override the managed checkout path. Running `./install.sh` from an existing repository checkout remains supported and installs a runner backed by that checkout instead.
+
 `codex-providers setup` starts the interactive provider wizard, and `codex-providers configure <provider>` chooses Claude, DeepSeek, or Gemini non-interactively. `codex-providers proxy ensure` checks the configured `/health` endpoint and exits silently if the server is already ready. Otherwise it installs dependencies when needed, builds `dist/index.js` when needed, starts `node dist/index.js --config=<repo>/config.yaml` in the background, and waits for the health endpoint to become ready. `codex-providers proxy stop` verifies the runner-owned PID before sending `SIGTERM`; use `codex-providers proxy stop && codex-providers proxy ensure` for a clean restart. `codex-providers proxy logs` prints the background log, and `codex-providers doctor` checks its health endpoint. Background logs are written to `~/.local/state/codex-providers/server.log` by default.
 
-To remove the runner and the managed `~/.zshrc` ensure block:
+To remove the runner and the managed `~/.zshrc` ensure block while preserving provider credentials and the managed source checkout:
 
 ```bash
-./install.sh --uninstall
+curl -fsSL https://raw.githubusercontent.com/apohl79/codex-providers/main/install.sh | bash -s -- --uninstall
 ```
 
 ## Configuration
