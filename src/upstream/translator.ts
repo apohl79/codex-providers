@@ -1100,6 +1100,7 @@ export interface ResponsesStreamState {
   currentToolArgs: string;
   currentThinkingText: string;
   currentReasoningId: string;
+  stopReason: string;
 }
 
 export function makeResponsesState(): ResponsesStreamState {
@@ -1118,6 +1119,7 @@ export function makeResponsesState(): ResponsesStreamState {
     currentToolArgs: "",
     currentThinkingText: "",
     currentReasoningId: "",
+    stopReason: "",
   };
 }
 
@@ -1454,19 +1456,28 @@ const responsesSSEHandlers: Record<string, ResponsesSSEHandler> = {
     return out;
   },
 
+  message_delta: (data, state) => {
+    state.stopReason = data.delta?.stop_reason || state.stopReason;
+    return [];
+  },
+
   message_stop: (_data, state, model, usage) => {
     const nextSeq = () => ++state.seq;
+    const incomplete = state.stopReason === "max_tokens";
     return [
       formatSSE({
-        type: "response.completed",
+        type: incomplete ? "response.incomplete" : "response.completed",
         sequence_number: nextSeq(),
         response: {
           id: state.respId,
           object: "response",
           created_at: state.createdAt,
-          status: "completed",
+          status: incomplete ? "incomplete" : "completed",
           model,
           output: [],
+          ...(incomplete
+            ? { incomplete_details: { reason: "max_output_tokens" } }
+            : {}),
           usage: formatResponsesUsage(
             usage.inputTokens,
             usage.outputTokens,

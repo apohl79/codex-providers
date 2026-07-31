@@ -1589,6 +1589,13 @@ test("anthropicSSEToResponses handles message_stop with usage", () => {
     cacheCreationInputTokens: 0,
     cacheReadInputTokens: 10,
   };
+  const deltaEvents = anthropicSSEToResponses(
+    "message_delta",
+    { delta: { stop_reason: "end_turn" } },
+    state,
+    "sonnet",
+    usage,
+  );
   const events = anthropicSSEToResponses(
     "message_stop",
     {},
@@ -1596,9 +1603,46 @@ test("anthropicSSEToResponses handles message_stop with usage", () => {
     "sonnet",
     usage,
   );
+  assert.deepEqual(deltaEvents, []);
   assert.ok(events.some((e) => e.includes("response.completed")));
   assert.ok(events.some((e) => e.includes("response.done")));
   assert.ok(events.some((e) => e.includes('"input_tokens":100')));
+});
+
+test("anthropicSSEToResponses maps max_tokens to an incomplete response", () => {
+  const state = makeResponsesState();
+  const usage: UsageData = {
+    inputTokens: 69360,
+    outputTokens: 8192,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 7857,
+  };
+  const deltaEvents = anthropicSSEToResponses(
+    "message_delta",
+    { delta: { stop_reason: "max_tokens" } },
+    state,
+    "sonnet",
+    usage,
+  );
+  const stopEvents = anthropicSSEToResponses(
+    "message_stop",
+    {},
+    state,
+    "sonnet",
+    usage,
+  );
+  const terminalEvents = stopEvents.map(parseResponsesSSE);
+
+  assert.deepEqual(deltaEvents, []);
+  assert.deepEqual(
+    terminalEvents.map((event) => event.type),
+    ["response.incomplete", "response.done"],
+  );
+  assert.equal(terminalEvents[0].response.status, "incomplete");
+  assert.deepEqual(terminalEvents[0].response.incomplete_details, {
+    reason: "max_output_tokens",
+  });
+  assert.equal(terminalEvents[0].response.usage.output_tokens, 8192);
 });
 
 test("anthropicSSEToResponses returns empty for unknown events", () => {
