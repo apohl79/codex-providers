@@ -317,6 +317,25 @@ function responseStatus(finishReason: unknown): string {
   return finishReason === "MAX_TOKENS" ? "incomplete" : "completed";
 }
 
+function noOutputDiagnostic(response: any): string | null {
+  const promptBlockReason = response?.promptFeedback?.blockReason;
+  const candidate = response?.candidates?.[0];
+  const finishReason = candidate?.finishReason;
+  const finishMessage = candidate?.finishMessage;
+
+  if (typeof promptBlockReason === "string" && promptBlockReason) {
+    return `Gemini blocked the prompt: ${promptBlockReason}.`;
+  }
+  if (typeof finishReason === "string" && finishReason) {
+    return `Gemini returned no visible output: ${finishReason}${
+      typeof finishMessage === "string" && finishMessage
+        ? ` (${finishMessage})`
+        : ""
+    }.`;
+  }
+  return null;
+}
+
 function functionCallItem(
   call: any,
   partThoughtSignature: unknown = "",
@@ -396,13 +415,18 @@ export function geminiToResponses(response: any, model: string): any {
       ),
   ];
   const usage = geminiUsageMetadata(response);
+  const error =
+    output.length === 0
+      ? noOutputDiagnostic(response) || "Gemini returned no visible output."
+      : null;
   return {
     id: `resp_${compactUuid()}`,
     object: "response",
     created_at: Math.floor(Date.now() / 1000),
-    status: responseStatus(candidate.finishReason),
+    status: error ? "failed" : responseStatus(candidate.finishReason),
     model,
     output,
+    ...(error ? { error: { type: "upstream_error", message: error } } : {}),
     usage: responsesUsage(usage),
   };
 }
@@ -418,6 +442,7 @@ export interface GeminiResponsesState {
   text: string;
   textOutputIndex: number | null;
   nextOutputIndex: number;
+  noOutputDiagnostic: string | null;
 }
 
 export function makeGeminiResponsesState(): GeminiResponsesState {
@@ -432,6 +457,7 @@ export function makeGeminiResponsesState(): GeminiResponsesState {
     text: "",
     textOutputIndex: null,
     nextOutputIndex: 0,
+    noOutputDiagnostic: null,
   };
 }
 
@@ -557,6 +583,7 @@ export function geminiSSEToResponses(
   state: GeminiResponsesState,
   model: string,
 ): string[] {
+  state.noOutputDiagnostic ||= noOutputDiagnostic(data);
   const candidate = data?.candidates?.[0];
   const parts = candidate?.content?.parts || [];
   const text = parts
@@ -592,6 +619,32 @@ export function completeGeminiResponses(
   if (state.completed) return [];
   state.completed = true;
   const output = startEvents(state, model);
+  if (state.nextOutputIndex === 0) {
+    output.push(
+      formatSse({
+        type: "response.failed",
+        sequence_number: nextSequence(state),
+        response: {
+          id: state.responseId,
+          object: "response",
+          created_at: state.createdAt,
+          status: "failed",
+          model,
+          error: {
+            type: "upstream_error",
+            message:
+              state.noOutputDiagnostic || "Gemini returned no visible output.",
+          },
+          usage: responsesUsage(usage),
+        },
+      }),
+      formatSse({
+        type: "response.done",
+        sequence_number: nextSequence(state),
+      }),
+    );
+    return output;
+  }
   if (state.textStarted) {
     output.push(
       formatSse({

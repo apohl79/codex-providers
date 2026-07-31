@@ -10,6 +10,7 @@ import {
   makeGeminiApiKeyToken,
 } from "../src/providers/gemini";
 import {
+  completeGeminiResponses,
   geminiToResponses,
   geminiSSEToResponses,
   makeGeminiResponsesState,
@@ -137,6 +138,21 @@ const NATIVE_THOUGHT_SIGNATURE_RESPONSE = {
         ],
       },
       finishReason: "STOP",
+    },
+  ],
+};
+
+const NATIVE_PROMPT_BLOCKED_RESPONSE = {
+  promptFeedback: { blockReason: "PROHIBITED_CONTENT" },
+  usageMetadata: { promptTokenCount: 21_577, candidatesTokenCount: 0 },
+};
+
+const NATIVE_MALFORMED_FUNCTION_CALL_RESPONSE = {
+  candidates: [
+    {
+      content: { parts: [] },
+      finishReason: "MALFORMED_FUNCTION_CALL",
+      finishMessage: "Function arguments were invalid.",
     },
   ],
 };
@@ -347,6 +363,36 @@ test("Gemini adapter restores thought signatures for replayed function calls", (
   ]);
 });
 
+test("Gemini adapter fails no-candidate responses with prompt feedback", () => {
+  const response = geminiToResponses(
+    NATIVE_PROMPT_BLOCKED_RESPONSE,
+    "gemini-3.1-pro-preview",
+  );
+
+  assert.equal(response.status, "failed");
+  assert.deepEqual(response.output, []);
+  assert.deepEqual(response.error, {
+    type: "upstream_error",
+    message: "Gemini blocked the prompt: PROHIBITED_CONTENT.",
+  });
+  assert.equal(response.usage.input_tokens, 21_577);
+  assert.equal(response.usage.output_tokens, 0);
+});
+
+test("Gemini adapter includes candidate termination details for empty output", () => {
+  const response = geminiToResponses(
+    NATIVE_MALFORMED_FUNCTION_CALL_RESPONSE,
+    "gemini-3.1-pro-preview",
+  );
+
+  assert.equal(response.status, "failed");
+  assert.deepEqual(response.error, {
+    type: "upstream_error",
+    message:
+      "Gemini returned no visible output: MALFORMED_FUNCTION_CALL (Function arguments were invalid.).",
+  });
+});
+
 test("Gemini adapter removes unsupported additionalProperties from nested tool schemas", () => {
   const request = responsesToGeminiGenerateContent(
     NESTED_ADDITIONAL_PROPERTIES_REQUEST,
@@ -386,4 +432,33 @@ test("Gemini streaming assigns a unique output index to each text and tool item"
     .map((event) => event.output_index);
 
   assert.deepEqual(outputIndexes, [0, 1, 2]);
+});
+
+test("Gemini streaming fails no-candidate responses with prompt feedback", () => {
+  const state = makeGeminiResponsesState();
+  const events = [
+    ...geminiSSEToResponses(
+      NATIVE_PROMPT_BLOCKED_RESPONSE,
+      state,
+      "gemini-3.1-pro-preview",
+    ),
+    ...completeGeminiResponses(state, "gemini-3.1-pro-preview", {
+      inputTokens: 21_577,
+      outputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      reasoningOutputTokens: 0,
+    }),
+  ].map((event) => JSON.parse(event.split("\n")[1].slice(6)));
+
+  const failure = events.find((event) => event.type === "response.failed");
+
+  assert.equal(
+    events.some((event) => event.type === "response.completed"),
+    false,
+  );
+  assert.deepEqual(failure.response.error, {
+    type: "upstream_error",
+    message: "Gemini blocked the prompt: PROHIBITED_CONTENT.",
+  });
 });
