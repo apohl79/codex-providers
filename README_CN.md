@@ -1,16 +1,16 @@
-# auth2api
+# codex-providers
 
 [English](./README.md)
 
 一个轻量级 OAuth 转 API 代理，把你的 Claude（Anthropic）、ChatGPT（OpenAI Codex）订阅，以及实验性的本地 Cursor 登录态变成可调用的 API，适配 Claude Code 与 OpenAI 兼容客户端。
 
-auth2api 的定位很克制：
+codex-providers 的定位很克制：
 
 - 用自己的 Claude / ChatGPT / Cursor 登录态（每个 provider 可挂多个账号）
 - 一个本地或自托管代理
 - 按模型名自动路由到对应 provider
 
-它并不试图做成大型多 provider 网关。如果你想要的是一个体积小、容易理解、方便自己改的代理，auth2api 就是为这个场景准备的。
+它并不试图做成大型多 provider 网关。如果你想要的是一个体积小、容易理解、方便自己改的代理，codex-providers 就是为这个场景准备的。
 
 ## 功能特性
 
@@ -33,15 +33,15 @@ auth2api 的定位很克制：
 ## 安装
 
 ```bash
-git clone https://github.com/AmazingAng/auth2api
-cd auth2api
+git clone https://github.com/apohl79/codex-providers
+cd codex-providers
 npm install
 npm run build
 ```
 
 ## 登录
 
-auth2api 支持以下上游 provider：
+codex-providers 支持以下上游 provider：
 
 - `anthropic`（默认）：Claude OAuth，对应 `claude-*` 模型。
 - `codex`：OpenAI 的 "Sign in with ChatGPT" OAuth，直连官方 codex 后端 `https://chatgpt.com/backend-api/codex/responses`，对应 `gpt-5*`（含 `gpt-5-codex`）、`o\d*`、`codex-*` 模型。**需要 ChatGPT Plus 或 Pro 订阅** —— Free 账号也能登录，但首次调用会被后端拒绝(`model not supported`)。
@@ -66,7 +66,7 @@ node dist/index.js --login --provider=cursor --cursor-import-local
 node dist/index.js --login --provider=cursor --cursor-storage=/path/to/state.vscdb
 ```
 
-Anthropic 和 Codex 会输出浏览器 URL。完成授权后，回调会自动处理。Anthropic 流程使用端口 `54545`，Codex 使用端口 `1455` —— 请确保两者都没被防火墙拦截。Cursor 走的是自己专属的 deep-link PKCE 流程：`auth2api` 会打印一条 `https://cursor.com/loginDeepControl?...` URL，你在浏览器里点「Yes, Log In」确认后，`auth2api` 会持续轮询 `api2.cursor.sh/auth/poll` 直到拿到 token——整个过程不需要本地回调端口。如果偏好直接导入 Cursor Desktop 已有的登录态，可以加 `--cursor-import-local`，或用 `--cursor-storage=/path/to/state.vscdb` 指向自定义安装位置。
+Anthropic 和 Codex 会输出浏览器 URL。完成授权后，回调会自动处理。Anthropic 流程使用端口 `54545`，Codex 使用端口 `1455` —— 请确保两者都没被防火墙拦截。Cursor 走的是自己专属的 deep-link PKCE 流程：`codex-providers` 会打印一条 `https://cursor.com/loginDeepControl?...` URL，你在浏览器里点「Yes, Log In」确认后，`codex-providers` 会持续轮询 `api2.cursor.sh/auth/poll` 直到拿到 token——整个过程不需要本地回调端口。如果偏好直接导入 Cursor Desktop 已有的登录态，可以加 `--cursor-import-local`，或用 `--cursor-storage=/path/to/state.vscdb` 指向自定义安装位置。
 
 ### 手动模式（适合远程服务器）
 
@@ -111,7 +111,7 @@ timeouts:
   stream-messages-ms: 600000 # 流式 /v1/messages 超时（10 分钟，适合 Claude Code 长任务）
   count-tokens-ms: 30000 # /v1/messages/count_tokens 超时
 
-# 请求指纹 — 控制 auth2api 如何模拟 Claude Code CLI
+# 请求指纹 — 控制 codex-providers 如何模拟 Claude Code CLI
 cloaking:
   cli-version: "2.1.88" # 模拟的 CLI 版本号
   entrypoint: "cli" # 计费归属入口（cli、mcp、sdk 等）
@@ -172,7 +172,7 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 | `cursor-default`                                     | cursor    | Cursor "Auto" 模型                           |
 | `cursor-premium` / `cursor-fast` / `cursor-composer` | cursor    | AvailableModels 拉取失败时使用的 fallback id |
 
-auth2api 额外支持以下便捷别名：
+codex-providers 额外支持以下便捷别名：
 
 - `opus` -> `claude-opus-4-7`
 - `sonnet` -> `claude-sonnet-4-6`
@@ -182,9 +182,9 @@ auth2api 额外支持以下便捷别名：
 
 #### "Cursor 独占" 模式（让 Claude Code / OpenAI SDK 零配置可用）
 
-当 **只有 Cursor 一个 provider 登录了账号**（anthropic、codex 都为空）时，所有模型名自动走 Cursor，`cursor-` 前缀变成可选。这意味着 Cursor 单 provider 的 auth2api 可以直接当 Anthropic API 或 OpenAI API 用：
+当 **只有 Cursor 一个 provider 登录了账号**（anthropic、codex 都为空）时，所有模型名自动走 Cursor，`cursor-` 前缀变成可选。这意味着 Cursor 单 provider 的 codex-providers 可以直接当 Anthropic API 或 OpenAI API 用：
 
-| 客户端发送                                                 | auth2api 行为                                                |
+| 客户端发送                                                 | codex-providers 行为                                          |
 | ---------------------------------------------------------- | ------------------------------------------------------------ |
 | `POST /v1/messages` `{"model":"claude-sonnet-4-5"}`        | 走 Cursor，把上游流重新编码成 Anthropic Messages SSE         |
 | `POST /v1/messages` `{"model":"opus"}`                     | `opus` → `claude-opus-4-7-medium`，回 Anthropic Messages SSE |
@@ -214,11 +214,11 @@ auth2api 额外支持以下便捷别名：
 
 #### Codex `/v1/responses` 请求体要求
 
-ChatGPT 的 codex 后端会拒绝缺少 `stream: true`、`store: false`、`instructions` 任一字段的请求，并且对 `max_output_tokens`、`parallel_tool_calls` 这类公共 Responses 字段会直接 400。auth2api 对所有三个 codex 端点（`/v1/chat/completions`、`/v1/messages`、`/v1/responses`）统一采用 sanitize + 强制流式的策略：
+ChatGPT 的 codex 后端会拒绝缺少 `stream: true`、`store: false`、`instructions` 任一字段的请求，并且对 `max_output_tokens`、`parallel_tool_calls` 这类公共 Responses 字段会直接 400。codex-providers 对所有三个 codex 端点（`/v1/chat/completions`、`/v1/messages`、`/v1/responses`）统一采用 sanitize + 强制流式的策略：
 
 - 客户端没传 `store: false` / `instructions` 时**自动补默认值**。
 - `max_output_tokens` 和 `parallel_tool_calls` 会被剥除 —— token 上限由 ChatGPT 套餐控制。
-- 上游调用**始终**带 `stream: true`，与客户端传的 `stream` 值无关。客户端要求 `stream: false` 时，auth2api 会在本地 drain 上游 SSE，再按原 wire 格式（Responses / Chat Completions / Anthropic Messages）输出单条 JSON —— 其中包括把 `response.output_item.done` 的 item 拼回 `output` 数组（因为 codex 的 `response.completed.response.output` 永远是 `[]`）。
+- 上游调用**始终**带 `stream: true`，与客户端传的 `stream` 值无关。客户端要求 `stream: false` 时，codex-providers 会在本地 drain 上游 SSE，再按原 wire 格式（Responses / Chat Completions / Anthropic Messages）输出单条 JSON —— 其中包括把 `response.output_item.done` 的 item 拼回 `output` 数组（因为 codex 的 `response.completed.response.output` 永远是 `[]`）。
 
 OpenAI Responses / Chat / Claude Code 客户端无需关心 codex 的特殊行为，直接用即可。
 
@@ -246,14 +246,14 @@ Decoder 会把 Cursor 上游的 chain-of-thought（reasoning）字节路由到 `
 
 ```bash
 # 构建
-docker build -t auth2api .
+docker build -t codex-providers .
 
 # 运行（挂载配置文件与 token 目录）
 docker run -d \
   -p 8317:8317 \
   -v ~/.codex-providers:/data \
   -v ./config.yaml:/config/config.yaml \
-  auth2api
+  codex-providers
 ```
 
 或者使用 docker-compose：
@@ -264,7 +264,7 @@ docker-compose up -d
 
 ## 与 Claude Code 配合使用
 
-将 `ANTHROPIC_BASE_URL` 指向 auth2api：
+将 `ANTHROPIC_BASE_URL` 指向 codex-providers：
 
 ```bash
 ANTHROPIC_BASE_URL=http://127.0.0.1:8317 \
@@ -272,15 +272,15 @@ ANTHROPIC_API_KEY=<your-api-key> \
 claude
 ```
 
-Claude Code 使用的是原生 `/v1/messages` 接口，auth2api 会直接透传。`Authorization: Bearer` 与 `x-api-key` 两种认证头都支持。
+Claude Code 使用的是原生 `/v1/messages` 接口，codex-providers 会直接透传。`Authorization: Bearer` 与 `x-api-key` 两种认证头都支持。
 
 ## 多账号
 
-auth2api 支持多个 Claude OAuth 账号，每个账号的 token 作为独立文件存储在 auth 目录中。
+codex-providers 支持多个 Claude OAuth 账号，每个账号的 token 作为独立文件存储在 auth 目录中。
 
 - 每执行一次 `--login` 可以添加一个账号的 token
 - 请求使用粘性选择策略 — 同一个账号会被持续使用，直到触发 cooldown
-- 当遇到限流或故障时，auth2api 会自动切换到下一个可用账号
+- 当遇到限流或故障时，codex-providers 会自动切换到下一个可用账号
 - 逐账号追踪 token 用量（输入、输出、缓存），并定期输出日志
 - 通过 `/admin/accounts` 可查看所有账号的状态
 
@@ -381,9 +381,9 @@ stats:
 
 `--login` 端的提示信息:
 
-- `Notified running auth2api server to reload tokens.` —— 成功,服务已加载新 token。
-- `(no auth2api server detected at <host>:<port> — token saved, will be loaded next start)` —— 连接被拒/超时。常见情形是当前没有服务在跑,不算错误。
-- `auth2api server is running but rejected the reload (HTTP 401/403). …restart the server to pick up the new token.` —— 可执行行动:把 config 改回原 api-key,或重启服务让其加载新 key。
+- `Notified running codex-providers server to reload tokens.` —— 成功,服务已加载新 token。
+- `(no codex-providers server detected at <host>:<port> — token saved, will be loaded next start)` —— 连接被拒/超时。常见情形是当前没有服务在跑,不算错误。
+- `codex-providers server is running but rejected the reload (HTTP 401/403). …restart the server to pick up the new token.` —— 可执行行动:把 config 改回原 api-key,或重启服务让其加载新 key。
 
 ## 测试
 

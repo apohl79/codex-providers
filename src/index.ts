@@ -135,7 +135,7 @@ async function browserCursorLogin(
       console.log("\nOpen this URL in your browser to authorize Cursor:\n");
       console.log(url);
       console.log(
-        '\nAfter signing in, click "Yes, Log In" — auth2api will pick up the token automatically.\n',
+        '\nAfter signing in, click "Yes, Log In" — codex-providers will pick up the token automatically.\n',
       );
     },
   });
@@ -317,7 +317,7 @@ async function startServer(): Promise<void> {
   const port = config.port;
 
   app.listen(port, host, () => {
-    console.log(`auth2api running on http://${host}:${port}`);
+    console.log(`codex-providers running on http://${host}:${port}`);
     console.log(`Endpoints:`);
     console.log(`  POST /v1/chat/completions`);
     console.log(`  POST /v1/responses`);

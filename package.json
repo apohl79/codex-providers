@@ -1,5 +1,5 @@
 {
-  "name": "auth2api",
+  "name": "codex-providers",
   "version": "1.0.0",
   "description": "Lightweight Claude OAuth to OpenAI-compatible API proxy",
   "main": "dist/index.js",

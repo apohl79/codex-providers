@@ -1,5 +1,5 @@
 services:
-  auth2api:
+  codex-providers:
     build: .
     ports:
       - "8317:8317"

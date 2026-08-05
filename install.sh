@@ -134,7 +134,7 @@ if [[ "$UNINSTALL" -eq 0 ]] && ! repository_checkout_is_complete "$SCRIPT_DIR"; 
 fi
 
 if [[ "$RUNNER_NAME" == "$LEGACY_RUNNER_NAME" ]]; then
-  echo "Error: auth2api is no longer a supported runner name; use codex-providers." >&2
+  echo "Error: the legacy runner name is no longer supported; use codex-providers." >&2
   exit 2
 fi
 
@@ -212,7 +212,7 @@ remove_legacy_installation() {
   while IFS= read -r runner_path; do
     if is_legacy_runner "$runner_path"; then
       rm -f "$runner_path"
-      echo "Removed legacy auth2api runner: $runner_path"
+      echo "Removed legacy runner: $runner_path"
     fi
   done < <(runner_paths "$LEGACY_RUNNER_NAME")
 }

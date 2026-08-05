@@ -9,10 +9,10 @@ Scope: `src/handlers`, `src/upstream` (Claude `/v1/responses` translation and Co
 ## 1. Problem
 
 Codex multi-agent (`multi_agent_v2`) has two inter-agent content failure modes
-when auth2api is in the path:
+when codex-providers is in the path:
 
 1. Same-provider Claude runs can lose the task payload because Codex stores the
-   parent tool argument in `agent_message.encrypted_content`, while auth2api's
+   parent tool argument in `agent_message.encrypted_content`, while codex-providers'
    Claude translator previously replaced every `encrypted_content` value with a
    placeholder.
 2. Mixed anthropic→openai/codex runs forward plaintext into a ChatGPT backend
@@ -45,15 +45,15 @@ Observed in Codex session rollouts:
 
 When the parent runs on the OpenAI provider, the backend returns the tool
 argument already sealed as a Fernet token. When the parent runs through
-auth2api's anthropic provider, auth2api does not perform that sealing, so the
-`encrypted_content` stays plaintext. For an anthropic child, auth2api must treat
+codex-providers' anthropic provider, codex-providers does not perform that sealing, so the
+`encrypted_content` stays plaintext. For an anthropic child, codex-providers must treat
 non-Fernet `encrypted_content` as readable plaintext during Responses→Anthropic
 translation. For an openai/codex child, forwarding that plaintext to ChatGPT is
 invalid because the backend tries to decrypt a field typed as encrypted content,
 fails to decode it, and drops the stream.
 
 The error text originates in the upstream ChatGPT backend; it exists in neither
-Codex nor auth2api.
+Codex nor codex-providers.
 
 ### Verified Fernet token structure (from a working openai→openai spawn)
 
@@ -69,7 +69,7 @@ total raw       : 377 bytes for a 51-byte plaintext task
 
 This is a standard [Fernet](https://github.com/fernet/spec/blob/master/Spec.md)
 token. The signing/encryption key is held by the ChatGPT backend and is **not**
-available to auth2api. That constraint drives the design options below.
+available to codex-providers. That constraint drives the design options below.
 
 ## 2. Goal
 
@@ -94,17 +94,17 @@ implementable outcome is:
 
 ## 3. Constraints
 
-- auth2api does not possess the ChatGPT backend's Fernet key. It cannot produce a
+- codex-providers does not possess the ChatGPT backend's Fernet key. It cannot produce a
   token the backend will accept, and cannot decrypt a token the backend produced.
-- The `encrypted_content` field is opaque to auth2api on both the request path
+- The `encrypted_content` field is opaque to codex-providers on both the request path
   (Codex → backend) and response path (backend → Codex).
-- Whatever auth2api does must keep single-provider topologies
+- Whatever codex-providers does must keep single-provider topologies
   (openai→openai, anthropic→anthropic) working unchanged.
 
 ## 4. Decision outcome - Claude plaintext pass-through plus Codex guard
 
 Because the real encryption key lives in the ChatGPT backend and is not available
-to auth2api, the only design that would support a child talking directly to
+to codex-providers, the only design that would support a child talking directly to
 `chatgpt.com/backend-api/codex` is to **delegate sealing/unsealing to that same
 backend**. That was Option A. Runtime instrumentation of Codex on 2026-07-06
 showed no separate callable seal/unseal request: the `gAAAAAB...` token appears
@@ -144,18 +144,18 @@ Requirements:
   provider topology. Do not attempt reverse-path unsealing until a callable
   backend surface is identified.
 
-Risk and dependency: without a callable backend seal/unseal surface, auth2api
+Risk and dependency: without a callable backend seal/unseal surface, codex-providers
 cannot synthesize tokens accepted by the real ChatGPT backend. The safe
 implementation is Claude plaintext pass-through for non-Fernet same-provider
 content, plus the §4.2 guard for Codex-targeted plaintext.
 
 ### 4.1 Alternatives considered
 
-- **Option B — auth2api-owned symmetric envelope.** auth2api seals with its own
+- **Option B — codex-providers-owned symmetric envelope.** codex-providers seals with its own
   Fernet key. Rejected as the primary design because it only works when **every**
-  agent traverses auth2api; it cannot satisfy a child that talks to the real
-  ChatGPT backend, which cannot decrypt an auth2api-owned token. Retain only if a
-  deployment forces all agents (including the openai provider) through auth2api.
+  agent traverses codex-providers; it cannot satisfy a child that talks to the real
+  ChatGPT backend, which cannot decrypt a codex-providers-owned token. Retain only if a
+  deployment forces all agents (including the openai provider) through codex-providers.
 - **Option C — provider-consistency guard.** Reject the cross-provider mismatch
   early with a structured 400 instead of a full mixed-provider fix. Selected
   after runtime capture showed no callable backend seal/unseal surface.
@@ -163,7 +163,7 @@ content, plus the §4.2 guard for Codex-targeted plaintext.
 ### 4.2 Provider-consistency guard
 
 Runtime capture showed the backend seals content implicitly inside `/responses`
-with no observed callable seal/unseal surface. auth2api must use the Option C
+with no observed callable seal/unseal surface. codex-providers must use the Option C
 guard: on the codex-native `/v1/responses` path, when the outbound body contains
 an `agent_message` with plaintext `encrypted_content`, return a structured 400
 that explains the provider-consistency requirement. This converts an opaque
@@ -174,7 +174,7 @@ dropped stream into an actionable error.
 For the Anthropic target path, `responsesToAnthropic` must preserve readable
 task content carried in `agent_message.encrypted_content` when the value is not a
 Fernet token. Fernet-shaped values remain masked as `[encrypted inter-agent
-content]` because auth2api cannot decrypt them.
+content]` because codex-providers cannot decrypt them.
 
 ## 5. Translation and guard contract
 
@@ -186,7 +186,7 @@ assertSupportedInterAgentContentDelivery(body, ctx): Result<void, ProviderConsis
 ```
 
 - `ctx` carries the target child provider.
-- The guard is pure with respect to auth2api state.
+- The guard is pure with respect to codex-providers state.
 - Errors are typed: `ProviderConsistencyError` for plaintext
   `encrypted_content` that would be forwarded to the real ChatGPT backend in a
   mixed-provider topology.
@@ -262,7 +262,7 @@ byte `0x80`, assert `len(raw) >= 1 + 8 + 16 + 32` and `(len(raw) - 57) % 16 == 0
    `agent_message` content is affected, not reasoning/function-output
    `encrypted_content` on ordinary turns.
 4. **Key custody (only if the rejected Option B is later revived).** If a
-   deployment forces all agents through auth2api and adopts self-contained
+   deployment forces all agents through codex-providers and adopts self-contained
    sealing, decide key rotation and multi-instance sharing. Not applicable to the
    selected provider-consistency guard.
 
@@ -289,7 +289,7 @@ byte `0x80`, assert `len(raw) >= 1 + 8 + 16 + 32` and `(len(raw) - 57) % 16 == 0
   translator pass-through for non-Fernet inter-agent content and masking for
   Fernet-shaped content.
 - Integration: mock ChatGPT backend with `/responses` rejecting non-Fernet
-  `encrypted_content` to reproduce the current failure, plus auth2api behavior
+  `encrypted_content` to reproduce the current failure, plus codex-providers behavior
   proving the request is rejected before proxying when the guard applies.
 - Regression: existing `tests/unit.test.ts` `responsesToAnthropic` suite and the
   `tests/responses-translator.test.ts` suite must stay green.
@@ -300,7 +300,7 @@ byte `0x80`, assert `len(raw) >= 1 + 8 + 16 + 32` and `(len(raw) - 57) % 16 == 0
   `InterAgentCommunication::{new_encrypted,to_model_input_item}`.
 - Codex has no local Fernet/seal implementation for message content (only
   agent-identity Curve25519 unseal for task ids).
-- Same-provider Claude failure mode: before the translator fix, auth2api replaced
+- Same-provider Claude failure mode: before the translator fix, codex-providers replaced
   all `agent_message.encrypted_content` with `[encrypted inter-agent content]`,
   which discarded plaintext tasks carried in the Codex transport field.
 - Failing rollout: anthropic parent → openai child, `encrypted_content` = 51-byte

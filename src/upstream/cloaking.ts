@@ -54,7 +54,7 @@ function generateBillingHeader(
 /**
  * Build metadata.user_id — JSON-stringified object matching real Claude Code.
  *
- * - device_id: fixed per auth2api instance (one "installation")
+ * - device_id: fixed per codex-providers instance (one "installation")
  * - account_uuid: fixed per OAuth account
  * - session_id: varies per API key (each downstream user = separate CLI session)
  */
@@ -92,7 +92,7 @@ function isPrefixBlock(block: any): boolean {
  * 1. OpenAI-compatible clients: Injects billing header, prefix, and metadata
  * 2. Claude Code CLI clients: Detects existing prefix/billing header, avoids duplication
  *
- * Always injects metadata.user_id (since external clients don't have the auth2api device_id).
+ * Always injects metadata.user_id (since external clients don't have the codex-providers device_id).
  */
 export interface CloakingOptions {
   body?: any;

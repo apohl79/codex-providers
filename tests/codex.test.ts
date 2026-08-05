@@ -1087,7 +1087,7 @@ test("notifyServerReload posts to /admin/reload with the first api-key as Bearer
     "Bearer sk-test",
   );
   assert.ok(
-    cap.logs.some((l) => l.includes("Notified running auth2api server")),
+    cap.logs.some((l) => l.includes("Notified running codex-providers server")),
   );
   assert.equal(cap.warns.length, 0);
 });
@@ -1107,7 +1107,9 @@ test("notifyServerReload silently info-logs on ECONNREFUSED (server not running)
   }
   // Info-level log, no warn — server not running is the common case.
   assert.equal(cap.warns.length, 0);
-  assert.ok(cap.logs.some((l) => l.includes("no auth2api server detected")));
+  assert.ok(
+    cap.logs.some((l) => l.includes("no codex-providers server detected")),
+  );
 });
 
 test("notifyServerReload warns on 401 (api-key mismatch)", async () => {
@@ -1145,7 +1147,9 @@ test("notifyServerReload silently info-logs on AbortSignal timeout", async () =>
     restoreFetch();
   }
   assert.equal(cap.warns.length, 0);
-  assert.ok(cap.logs.some((l) => l.includes("no auth2api server detected")));
+  assert.ok(
+    cap.logs.some((l) => l.includes("no codex-providers server detected")),
+  );
 });
 
 test("notifyServerReload warns on unexpected non-OK status", async () => {

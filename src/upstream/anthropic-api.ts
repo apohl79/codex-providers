@@ -62,7 +62,7 @@ function getStainlessOs(): string {
  * Real Claude Code: one randomUUID() per CLI process, reused for every API
  * call in that session, regenerated on /clear.
  *
- * auth2api is a long-running server, so a single global session ID would look
+ * codex-providers is a long-running server, so a single global session ID would look
  * like one CLI session that never closes. Instead we maintain one session ID
  * per client API key (≈ one "CLI process" per user). Each session ID expires
  * after SESSION_TTL_MS of inactivity so repeated use still looks like a human

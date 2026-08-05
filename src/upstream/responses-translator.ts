@@ -1,6 +1,6 @@
 /**
  * Translators between OpenAI Responses API and the two other public
- * formats auth2api exposes (OpenAI Chat Completions and Anthropic
+ * formats codex-providers exposes (OpenAI Chat Completions and Anthropic
  * Messages). These exist so providers whose upstream is the OpenAI
  * Responses API natively (currently codex) can serve `/v1/chat/completions`
  * and `/v1/messages` requests without going through anthropic as an

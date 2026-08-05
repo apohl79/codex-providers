@@ -41,7 +41,7 @@ node dist/index.js --login --provider=cursor --cursor-import-local
 node dist/index.js --login --provider=cursor --cursor-storage=/path/to/state.vscdb
 ```
 
-Anthropic OAuth and Codex open a browser URL. After authorizing, the callback is handled automatically. The Anthropic OAuth flow uses port `54545`; the Codex flow uses port `1455` — make sure neither is blocked by your firewall. `--login --provider=anthropic --auth=api-key` securely prompts for an Anthropic key when `ANTHROPIC_API_KEY` is unset, then saves it in `auth-dir`; `--login --provider=google` does the same for Gemini. Gemini calls use the native `models.generateContent` and `models.streamGenerateContent` APIs, not Google's OpenAI-compatible endpoint. Cursor uses a different "deep-link" PKCE flow: it prints a `https://cursor.com/loginDeepControl?...` URL, you click "Yes, Log In" in your browser, and `auth2api` polls `api2.cursor.sh/auth/poll` until the token is issued — no callback port required. Pass `--cursor-import-local` (or `--cursor-storage=...`) if you'd rather pull the existing token out of your Cursor desktop install.
+Anthropic OAuth and Codex open a browser URL. After authorizing, the callback is handled automatically. The Anthropic OAuth flow uses port `54545`; the Codex flow uses port `1455` — make sure neither is blocked by your firewall. `--login --provider=anthropic --auth=api-key` securely prompts for an Anthropic key when `ANTHROPIC_API_KEY` is unset, then saves it in `auth-dir`; `--login --provider=google` does the same for Gemini. Gemini calls use the native `models.generateContent` and `models.streamGenerateContent` APIs, not Google's OpenAI-compatible endpoint. Cursor uses a different "deep-link" PKCE flow: it prints a `https://cursor.com/loginDeepControl?...` URL, you click "Yes, Log In" in your browser, and `codex-providers` polls `api2.cursor.sh/auth/poll` until the token is issued — no callback port required. Pass `--cursor-import-local` (or `--cursor-storage=...`) if you'd rather pull the existing token out of your Cursor desktop install.
 
 When the interactive `codex-providers` wizard selects Claude OAuth or an Anthropic API key, it keeps only that persisted Claude authentication method in `auth-dir`; the removed opposite-method files are saved as timestamped `*.bak-codex-providers-*` backups.
 
@@ -54,7 +54,7 @@ node dist/index.js --login --provider=codex --manual
 
 Open the printed URL in your browser. After authorizing, your browser will redirect to a `localhost` URL that fails to load — copy the full URL from the address bar and paste it back into the terminal.
 
-You can run `--login` multiple times to add additional accounts (per provider). auth2api stores credentials side-by-side in `auth-dir` (`claude-<email>.json`, `codex-<email>.json`, `deepseek-<email>.json`, `google-<email>.json`, and `cursor-<email>.json`) and routes inbound requests to the matching pool by model name. Existing `gemini-<email>.json` credentials remain readable during migration. API-key login writes an owner-only credential file; environment API keys remain in memory only. Logging in to only one provider is fine — the others simply have no advertised models.
+You can run `--login` multiple times to add additional accounts (per provider). codex-providers stores credentials side-by-side in `auth-dir` (`claude-<email>.json`, `codex-<email>.json`, `deepseek-<email>.json`, `google-<email>.json`, and `cursor-<email>.json`) and routes inbound requests to the matching pool by model name. Existing `gemini-<email>.json` credentials remain readable during migration. API-key login writes an owner-only credential file; environment API keys remain in memory only. Logging in to only one provider is fine — the others simply have no advertised models.
 
 ### Model advertisements
 
@@ -119,7 +119,7 @@ timeouts:
   stream-messages-ms: 600000 # stream /v1/messages timeout (10 min, suitable for Claude Code)
   count-tokens-ms: 30000 # /v1/messages/count_tokens timeout
 
-# Request fingerprinting — controls how auth2api mimics Claude Code CLI
+# Request fingerprinting — controls how codex-providers mimics Claude Code CLI
 cloaking:
   cli-version: "2.1.88" # CLI version to impersonate
   entrypoint: "cli" # billing attribution entrypoint (cli, mcp, sdk, etc.)
@@ -182,7 +182,7 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 | `cursor-default`                                     | cursor    | Cursor "Auto" model                                |
 | `cursor-premium` / `cursor-fast` / `cursor-composer` | cursor    | Fallback ids when AvailableModels can't be reached |
 
-Short convenience aliases accepted by auth2api but omitted from `/v1/models`:
+Short convenience aliases accepted by codex-providers but omitted from `/v1/models`:
 
 - `fable` -> `claude-fable-5`
 - `opus` -> `claude-opus-4-8`
@@ -191,15 +191,15 @@ Short convenience aliases accepted by auth2api but omitted from `/v1/models`:
 - `sonnet` -> `claude-sonnet-5`
 - `haiku` -> `claude-haiku-4-5-20251001`
 
-Claude Code's `[1m]` suffix is accepted on Claude aliases and API IDs (for example `opus[1m]` or `claude-opus-4-8[1m]`). auth2api strips the suffix before calling Anthropic; current 1M-capable Claude models use the 1M context window by default and do not need the retired `context-1m` beta header.
+Claude Code's `[1m]` suffix is accepted on Claude aliases and API IDs (for example `opus[1m]` or `claude-opus-4-8[1m]`). codex-providers strips the suffix before calling Anthropic; current 1M-capable Claude models use the 1M context window by default and do not need the retired `context-1m` beta header.
 
 Routing: requests are dispatched to the matching pool by model name. `claude-*` and the bare aliases (`fable`/`opus`/`opus-4.8`/`sonnet`/`haiku`) hit your Claude account; `gpt-5*`, `o\d` (`o3`, `o4-mini`, …), and `codex-*` hit your Codex account; `deepseek-v4-*` hits DeepSeek; `cursor-*` and `cr/*` hit your Cursor account. Other model families (`gpt-3.5-*`, `gpt-4*`, …) are not served by either backend and route to anthropic by default. If you have not configured the matching provider, the request returns `503 no_account_for_provider` with the required setup in its message.
 
 #### "Cursor exclusive" mode (zero-config Claude Code / OpenAI clients)
 
-When **only Cursor has a logged-in account** (anthropic and codex are both empty), every model name routes to Cursor automatically — `cursor-` prefix becomes optional. This is what makes a Cursor-only auth2api a drop-in replacement for the Anthropic API or the OpenAI API:
+When **only Cursor has a logged-in account** (anthropic and codex are both empty), every model name routes to Cursor automatically — `cursor-` prefix becomes optional. This is what makes a Cursor-only codex-providers proxy a drop-in replacement for the Anthropic API or the OpenAI API:
 
-| Client behaviour                                           | What auth2api does                                                                 |
+| Client behaviour                                           | What codex-providers does                                                          |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `POST /v1/messages` `{"model":"claude-sonnet-4-5"}`        | routes through Cursor and re-encodes the upstream stream as Anthropic Messages SSE |
 | `POST /v1/messages` `{"model":"opus"}`                     | maps `opus` → `claude-opus-4-7-medium` on Cursor, returns Anthropic Messages SSE   |
@@ -229,11 +229,11 @@ For Codex (ChatGPT-account backend) the same coverage is achieved through a dedi
 
 #### Codex `/v1/responses` body requirements
 
-The ChatGPT codex backend rejects requests that don't include `stream: true`, `store: false`, and `instructions`, and 400s on a couple of public Responses fields (`max_output_tokens`, `parallel_tool_calls`). auth2api applies the same sanitize-and-force-stream pattern to all three codex endpoints (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`):
+The ChatGPT codex backend rejects requests that don't include `stream: true`, `store: false`, and `instructions`, and 400s on a couple of public Responses fields (`max_output_tokens`, `parallel_tool_calls`). codex-providers applies the same sanitize-and-force-stream pattern to all three codex endpoints (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`):
 
 - `store: false` and `instructions: ""` are auto-filled when the client omits them.
 - `max_output_tokens` and `parallel_tool_calls` are stripped — the backend caps tokens by your ChatGPT plan instead.
-- The upstream call is **always** made with `stream: true` regardless of the client's `stream` value. If the client asked for `stream: false`, auth2api drains the upstream SSE locally and returns a single JSON body in the requested wire format (Responses, Chat Completions, or Anthropic Messages) — including stitching `response.output_item.done` items into `output` because codex's `response.completed.response.output` is always `[]`.
+- The upstream call is **always** made with `stream: true` regardless of the client's `stream` value. If the client asked for `stream: false`, codex-providers drains the upstream SSE locally and returns a single JSON body in the requested wire format (Responses, Chat Completions, or Anthropic Messages) — including stitching `response.output_item.done` items into `output` because codex's `response.completed.response.output` is always `[]`.
 
 Off-the-shelf OpenAI Responses / Chat / Claude Code clients all just work without knowing about codex's quirks.
 
@@ -261,14 +261,14 @@ The decoder routes Cursor's chain-of-thought (`reasoning`) bytes to `response.re
 
 ```bash
 # Build
-docker build -t auth2api .
+docker build -t codex-providers .
 
 # Run (mount your config and token directory)
 docker run -d \
   -p 8317:8317 \
   -v ~/.codex-providers:/data \
   -v ./config.yaml:/config/config.yaml \
-  auth2api
+  codex-providers
 ```
 
 Or with docker-compose:
@@ -279,7 +279,7 @@ docker-compose up -d
 
 ## Use with Claude Code
 
-Set `ANTHROPIC_BASE_URL` to point Claude Code at auth2api:
+Set `ANTHROPIC_BASE_URL` to point Claude Code at codex-providers:
 
 ```bash
 ANTHROPIC_BASE_URL=http://127.0.0.1:8317 \
@@ -287,7 +287,7 @@ ANTHROPIC_API_KEY=<your-api-key> \
 claude
 ```
 
-Claude Code uses the native `/v1/messages` endpoint which auth2api passes through directly. Both `Authorization: Bearer` and `x-api-key` authentication headers are supported.
+Claude Code uses the native `/v1/messages` endpoint which codex-providers passes through directly. Both `Authorization: Bearer` and `x-api-key` authentication headers are supported.
 
 ## Use with Codex
 
@@ -325,8 +325,8 @@ stream_idle_timeout_ms = 600000
 # Emit the first api key from this repo's config.yaml. Use an absolute node path
 # if your shell PATH is not available to Codex.
 command = "node"
-args = ["-e", "const fs = require('fs'); const yaml = require('js-yaml'); const cfg = yaml.load(fs.readFileSync('/path/to/auth2api/config.yaml', 'utf8')); const key = cfg?.['api-keys']?.[0]; if (!key) process.exit(1); process.stdout.write(key);"]
-cwd = "/path/to/auth2api"
+args = ["-e", "const fs = require('fs'); const yaml = require('js-yaml'); const cfg = yaml.load(fs.readFileSync('/path/to/codex-providers/config.yaml', 'utf8')); const key = cfg?.['api-keys']?.[0]; if (!key) process.exit(1); process.stdout.write(key);"]
+cwd = "/path/to/codex-providers"
 timeout_ms = 5000
 refresh_interval_ms = 300000
 ```
@@ -408,11 +408,11 @@ This reads `docs/prompts/gpt.md` and writes its content into `base_instructions`
 
 ## Multi-account
 
-auth2api supports multiple Claude OAuth accounts and Anthropic API-key credentials. Each account is stored as a separate credential file in the auth directory.
+codex-providers supports multiple Claude OAuth accounts and Anthropic API-key credentials. Each account is stored as a separate credential file in the auth directory.
 
 - Run `--login` once per account to add tokens
 - Requests are routed using sticky selection — the same account is reused until it hits a cooldown
-- On rate limit or failure, auth2api automatically fails over to the next available account
+- On rate limit or failure, codex-providers automatically fails over to the next available account
 - Per-account token usage (input, output, cache) is tracked and logged periodically
 - Use `/admin/accounts` to inspect all account states
 
@@ -512,9 +512,9 @@ stats:
 
 Failure modes of the auto-notify (printed by `--login`):
 
-- `Notified running auth2api server to reload tokens.` — success, server picked up the new token.
-- `(no auth2api server detected at <host>:<port> — token saved, will be loaded next start)` — connection refused / timeout. Common case when no server is running; not an error.
-- `auth2api server is running but rejected the reload (HTTP 401/403). The api-keys in config.yaml may differ from the running server's; restart the server to pick up the new key set.` — actionable: either edit your config back to match, or restart so the server picks up the new key set.
+- `Notified running codex-providers server to reload tokens.` — success, server picked up the new token.
+- `(no codex-providers server detected at <host>:<port> — token saved, will be loaded next start)` — connection refused / timeout. Common case when no server is running; not an error.
+- `codex-providers server is running but rejected the reload (HTTP 401/403). The api-keys in config.yaml may differ from the running server's; restart the server to pick up the new key set.` — actionable: either edit your config back to match, or restart so the server picks up the new key set.
 
 ## Tests
 

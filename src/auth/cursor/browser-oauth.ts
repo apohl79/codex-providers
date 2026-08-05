@@ -172,7 +172,7 @@ function pollHeaders(userAgent?: string): Record<string, string> {
     // rate-limit responses on plain `node-fetch`/curl.
     "User-Agent":
       userAgent ||
-      `Cursor/${DEFAULT_CURSOR_CLIENT_VERSION} (auth2api browser login)`,
+      `Cursor/${DEFAULT_CURSOR_CLIENT_VERSION} (codex-providers browser login)`,
   };
 }
 
@@ -350,7 +350,7 @@ export class CursorBrowserLoginMissingRefreshTokenError extends Error {
     super(
       "Cursor browser login completed but did not return a refresh token. " +
         "This usually means the deep-link confirmed in API-key (PAT) mode. " +
-        "Re-run the login (`auth2api --login --provider=cursor`) and make sure " +
+        "Re-run the login (`codex-providers --login --provider=cursor`) and make sure " +
         "you click the regular Cursor login button, or fall back to importing " +
         "the local desktop login with --cursor-import-local.",
     );

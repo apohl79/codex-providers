@@ -62,7 +62,7 @@ export function accountUnavailable(
   if (!failureKind) {
     resp.status(503).json({
       error: {
-        message: `No ${provider} accounts loaded. Run: auth2api --login --provider=${provider}`,
+        message: `No ${provider} accounts loaded. Run: codex-providers --login --provider=${provider}`,
         type: "no_account_for_provider",
         provider,
       },

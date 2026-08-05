@@ -5,7 +5,7 @@ import yaml from "js-yaml";
 
 /**
  * Cloaking configuration for request fingerprinting.
- * Controls how auth2api mimics Claude Code CLI's request signature.
+ * Controls how codex-providers mimics Claude Code CLI's request signature.
  */
 export interface CloakingConfig {
   /** CLI version to impersonate in User-Agent and fingerprint (default: 2.1.88) */

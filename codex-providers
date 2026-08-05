@@ -149,7 +149,7 @@ BACKENDS = {
     "gemini": Backend(
         key="gemini",
         label="Gemini",
-        description="Uses your Gemini API key through the local auth2api adapter.",
+        description="Uses your Gemini API key through the local codex-providers adapter.",
         default_context="gemini",
         default_provider="google",
         auth2api_provider="google",
@@ -991,7 +991,7 @@ def with_catalog_schema(entry: dict, backend: Backend) -> dict:
     if backend.key == "gemini":
         updated["input_modalities"] = ["text", "image"]
     if backend.key in {"claude", "deepseek"}:
-        # auth2api translates Responses function tools to Anthropic tools. Its
+        # codex-providers translates Responses function tools to Anthropic tools. Its
         # custom freeform code-mode tool is not forwarded to Anthropic-backed providers.
         updated["tool_mode"] = "direct"
     return updated
@@ -1382,7 +1382,7 @@ base_url = {toml_string(draft.base_url)}
 {query_params}wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
-# auth2api's Responses-to-Anthropic bridge forwards flat function/custom tools;
+# codex-providers' Responses-to-Anthropic bridge forwards flat function/custom tools;
 # namespace tools are not represented in the Anthropic Messages request.
 namespace_tools = false
 stream_idle_timeout_ms = 600000
@@ -1407,7 +1407,7 @@ def context_content(draft: Draft) -> str:
         f"model_context_window = {draft.context_window}",
         f"model_auto_compact_token_limit = {draft.compact_limit}",
     ]
-    # auth2api backends do not use Codex service tiers. Override any
+    # codex-providers backends do not use Codex service tiers. Override any
     # global default so Codex sends the provider's standard tier.
     lines.append('service_tier = "default"')
     lines.append("")
@@ -1758,7 +1758,7 @@ def choose_missing_login_action(auth_dir: Path, backend: Backend = BACKENDS["cla
             [
                 (
                     f"Run {backend.label} login now",
-                    f"Opens the auth2api {backend.label} login flow, stores the credential, and reloads the running server.",
+                    f"Opens the codex-providers {backend.label} login flow, stores the credential, and reloads the running server.",
                 ),
                 (
                     "Configure Codex only",
@@ -1903,7 +1903,7 @@ def ensure_backend_login(
             raise SystemExit(
                 f"Error: no Gemini credential found in {auth_dir}. Run codex-providers from a terminal, set {auth_config.gemini_api_key_env}, or pass --skip-login-check."
             )
-        print(f"No Gemini credential found in {auth_dir}. Enter a Gemini API key to configure auth2api.")
+        print(f"No Gemini credential found in {auth_dir}. Enter a Gemini API key to configure codex-providers.")
         run_google_login(repo_dir, auth2api_config_path)
         if not has_google_login(auth_dir, auth_config.gemini_api_key_env):
             raise SystemExit(f"Error: Gemini login completed but no credential was found in {auth_dir}.")

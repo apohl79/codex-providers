@@ -19,7 +19,7 @@ export function normalizeNotifyHost(configured: string | undefined): string {
 }
 
 /**
- * Notify a running auth2api server (if any) that a freshly persisted token is
+ * Notify a running codex-providers server (if any) that a freshly persisted token is
  * on disk and should be reloaded. Best-effort: any failure degrades to a clear
  * console message and never throws — `--login` should always exit 0 once the
  * token is saved.
@@ -56,25 +56,27 @@ export async function notifyServerReload(config: Config): Promise<void> {
       code === "TimeoutError"
     ) {
       console.log(
-        `(no auth2api server detected at ${host}:${port} — token saved, will be loaded next start)`,
+        `(no codex-providers server detected at ${host}:${port} — token saved, will be loaded next start)`,
       );
       return;
     }
-    console.warn(`auth2api server reload failed: ${err?.message || err}`);
+    console.warn(
+      `codex-providers server reload failed: ${err?.message || err}`,
+    );
     return;
   }
 
   if (resp.ok) {
-    console.log("Notified running auth2api server to reload tokens.");
+    console.log("Notified running codex-providers server to reload tokens.");
     return;
   }
   if (resp.status === 401 || resp.status === 403) {
     console.warn(
-      `auth2api server is running but rejected the reload (HTTP ${resp.status}). ` +
+      `codex-providers server is running but rejected the reload (HTTP ${resp.status}). ` +
         `The api-keys in config.yaml may differ from the running server's; ` +
         `restart the server to pick up the new token.`,
     );
     return;
   }
-  console.warn(`auth2api server reload returned HTTP ${resp.status}.`);
+  console.warn(`codex-providers server reload returned HTTP ${resp.status}.`);
 }

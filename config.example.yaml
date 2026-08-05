@@ -13,7 +13,7 @@ deepseek:
   api-key-env: "DEEPSEEK_API_KEY"
   base-url: "https://api.deepseek.com/anthropic"
 
-# Gemini API-key authentication. auth2api translates OpenAI Responses requests
+# Gemini API-key authentication. codex-providers translates OpenAI Responses requests
 # to Gemini's native GenerateContent API. Keep the key in the environment (or
 # a secrets manager), never in this file.
 gemini:
@@ -59,7 +59,7 @@ stats:
 # verbose = errors + per-request access logs
 debug: "off"
 
-# Request fingerprinting — controls how auth2api mimics Claude Code CLI
+# Request fingerprinting — controls how codex-providers mimics Claude Code CLI
 # These settings affect the User-Agent, billing header, and fingerprint
 cloaking:
   # CLI version to impersonate (default: 2.1.88)

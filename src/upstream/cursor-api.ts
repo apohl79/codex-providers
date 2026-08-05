@@ -348,7 +348,7 @@ const PUBLIC_MODEL_TO_CURSOR: Record<string, string> = {
 
 /**
  * Normalise an inbound model id for the Cursor upstream:
- *   1. strip the auth2api routing prefix (`cursor-`, `cursor:`, `cr/`)
+ *   1. strip the codex-providers routing prefix (`cursor-`, `cursor:`, `cr/`)
  *   2. translate well-known public names (`claude-sonnet-4-5`, `opus`,
  *      `gpt-5.5`, `o3`, …) into Cursor's internal SKU
  *   3. otherwise keep the trimmed name verbatim — it's already a Cursor SKU
@@ -1287,7 +1287,7 @@ async function* openaiResponsesGenerator(
 /**
  * Stream Cursor's responses out as Anthropic Messages SSE so Claude Code
  * (and any other Anthropic-native client) can hit `/v1/messages` against
- * auth2api with vanilla model names like `claude-sonnet-4-5` and have it
+ * codex-providers with vanilla model names like `claude-sonnet-4-5` and have it
  * Just Work over a Cursor account.
  *
  * Reasoning bytes are routed to a `thinking` content block; final text goes

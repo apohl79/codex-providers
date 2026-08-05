@@ -659,7 +659,7 @@ export class AccountManager {
       if (err instanceof RefreshTokenExhaustedError) {
         // Terminal — refresh token cannot be reused. Long cooldown + clear
         // operator-facing message; don't keep hammering the upstream.
-        const message = `refresh token ${err.reason}; re-run \`auth2api --login --provider=${this.provider}\` to re-authorize`;
+        const message = `refresh token ${err.reason}; re-run \`codex-providers --login --provider=${this.provider}\` to re-authorize`;
         acct.failureCount++;
         acct.totalFailures++;
         acct.lastFailureKind = "auth";
