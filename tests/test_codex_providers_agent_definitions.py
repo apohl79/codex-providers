@@ -42,7 +42,7 @@ class AgentDefinitionsTest(unittest.TestCase):
             "claude-haiku-4-5-20251001",
             "medium",
             400000,
-            380000,
+            360000,
             8,
             codex_home / "claude-models.json",
             False,

@@ -339,7 +339,7 @@ model_fast = "claude-haiku-4-5-20251001"
 model_provider = "anthropic"
 model_catalog_json = "/Users/you/.codex/claude-models.json"
 model_context_window = 400000
-model_auto_compact_token_limit = 380000
+model_auto_compact_token_limit = 360000
 ```
 
 The important parts are:
@@ -362,10 +362,10 @@ Token budget choices in the wizard:
 
 | Choice                    | `model_context_window` | `model_auto_compact_token_limit` |
 | ------------------------- | ---------------------- | -------------------------------- |
-| 1M context                | `1000000`              | `950000`                         |
-| Recommended context       | `400000`               | `380000`                         |
-| Small context             | `200000`               | `190000`                         |
-| Tiny context              | `128000`               | `121600`                         |
+| 1M context                | `1000000`              | `900000`                         |
+| Recommended context       | `400000`               | `360000`                         |
+| Small context             | `200000`               | `180000`                         |
+| Tiny context              | `128000`               | `115200`                         |
 
 Reasoning level choices in the wizard:
 

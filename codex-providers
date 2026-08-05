@@ -162,7 +162,7 @@ BACKENDS = {
 
 
 DEFAULT_CONTEXT_WINDOW = 400000
-DEFAULT_COMPACT_LIMIT = 380000
+DEFAULT_COMPACT_LIMIT = 360000
 DEFAULT_REASONING_LEVEL = "medium"
 DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION = 8
 OPENAI_GENERAL_AGENT_MODEL = "gpt-5.6-sol"
@@ -2010,10 +2010,10 @@ def ensure_claude_login(
 def context_budget_choices() -> list[tuple[str, str]]:
     return [
         ("Keep current limits", "Context window: {context_window} tokens. Auto-compact threshold: {compact_limit} tokens."),
-        ("1M context", "Context window: 1000000 tokens. Auto-compact threshold: 950000 tokens."),
-        ("Recommended context", "Context window: 400000 tokens. Auto-compact threshold: 380000 tokens."),
-        ("Small context", "Context window: 200000 tokens. Auto-compact threshold: 190000 tokens."),
-        ("Tiny context", "Context window: 128000 tokens. Auto-compact threshold: 121600 tokens."),
+        ("1M context", "Context window: 1000000 tokens. Auto-compact threshold: 900000 tokens."),
+        ("Recommended context", "Context window: 400000 tokens. Auto-compact threshold: 360000 tokens."),
+        ("Small context", "Context window: 200000 tokens. Auto-compact threshold: 180000 tokens."),
+        ("Tiny context", "Context window: 128000 tokens. Auto-compact threshold: 115200 tokens."),
     ]
 
 
@@ -2119,7 +2119,7 @@ def choose_draft(
 
     budget_choice = ui.menu(
         "Token Budget",
-        "Context window is the total usable token budget. Preset auto-compact thresholds are 95% of that window.",
+        "Context window is the total usable token budget. Preset auto-compact thresholds are 90% of that window.",
         [
             (label, description.format(context_window=context_window, compact_limit=compact_limit))
             for label, description in context_budget_choices()
@@ -2127,13 +2127,13 @@ def choose_draft(
         0,
     )
     if budget_choice == 1:
-        context_window, compact_limit = 1000000, 950000
+        context_window, compact_limit = 1000000, 900000
     if budget_choice == 2:
-        context_window, compact_limit = 400000, 380000
+        context_window, compact_limit = 400000, 360000
     if budget_choice == 3:
-        context_window, compact_limit = 200000, 190000
+        context_window, compact_limit = 200000, 180000
     if budget_choice == 4:
-        context_window, compact_limit = 128000, 121600
+        context_window, compact_limit = 128000, 115200
 
     current_max_threads = args.max_concurrent_threads_per_session or parse_multi_agent_v2_threads(codex_config)
     concurrency_choices = [

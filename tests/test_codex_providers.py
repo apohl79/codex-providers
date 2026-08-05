@@ -433,7 +433,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
                 "gemini-3.6-flash",
                 "medium",
                 400000,
-                380000,
+                360000,
                 8,
                 codex_home / "gemini-models.json",
                 True,
@@ -488,7 +488,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
         draft = codex_manager.Draft(
             "gemini", Path("/tmp/gemini.toml"), "google", "Gemini", codex_manager.BACKENDS["gemini"],
             "http://127.0.0.1:8317/v1", ("gemini-3.6-flash",), "gemini-3.6-flash", "gemini-3.6-flash",
-            "medium", 400000, 380000, 8, Path("/tmp/gemini-models.json"), False,
+            "medium", 400000, 360000, 8, Path("/tmp/gemini-models.json"), False,
         )
 
         provider = codex_manager.provider_block(draft, Path("/tmp/auth2api"), Path("/tmp/auth2api/config.yaml"))
@@ -514,7 +514,7 @@ class GeminiProxyBackendTest(unittest.TestCase):
             draft = codex_manager.Draft(
                 "gemini", context_path, "google", "Gemini", codex_manager.BACKENDS["gemini"],
                 "http://127.0.0.1:8317/v1", ("gemini-3.6-flash",), "gemini-3.6-flash", "gemini-3.6-flash",
-                "medium", 400000, 380000, 8, root / "gemini-models.json", False,
+                "medium", 400000, 360000, 8, root / "gemini-models.json", False,
             )
 
             codex_manager.write_files(
@@ -607,10 +607,15 @@ class ProviderMenuTest(unittest.TestCase):
         choices = codex_manager.context_budget_choices()
 
         self.assertEqual(
-            [label for label, _ in choices],
-            ["Keep current limits", "1M context", "Recommended context", "Small context", "Tiny context"],
+            choices,
+            [
+                ("Keep current limits", "Context window: {context_window} tokens. Auto-compact threshold: {compact_limit} tokens."),
+                ("1M context", "Context window: 1000000 tokens. Auto-compact threshold: 900000 tokens."),
+                ("Recommended context", "Context window: 400000 tokens. Auto-compact threshold: 360000 tokens."),
+                ("Small context", "Context window: 200000 tokens. Auto-compact threshold: 180000 tokens."),
+                ("Tiny context", "Context window: 128000 tokens. Auto-compact threshold: 115200 tokens."),
+            ],
         )
-        self.assertFalse(any("Claude" in text for item in choices for text in item))
 
 
 class CommandLineIdentityTest(unittest.TestCase):
