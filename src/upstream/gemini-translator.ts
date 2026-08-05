@@ -272,7 +272,7 @@ export function responsesToGeminiGenerateContent(body: any): any {
       continue;
     }
     if (item?.type === "agent_message") {
-      appendContent(contents, "model", contentParts(item.content));
+      appendContent(contents, "user", contentParts(item.content));
       continue;
     }
     const role =

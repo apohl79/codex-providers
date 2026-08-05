@@ -363,6 +363,54 @@ test("Gemini adapter restores thought signatures for replayed function calls", (
   ]);
 });
 
+test("Gemini adapter preserves inter-agent assignment and follow-up ordering", () => {
+  const request = responsesToGeminiGenerateContent({
+    model: "gemini-3.6-flash",
+    input: [
+      {
+        type: "agent_message",
+        content: [{ type: "input_text", text: "Review the implementation." }],
+      },
+      { role: "assistant", content: "I completed the first pass." },
+      {
+        type: "agent_message",
+        content: "Continue with the failing test.",
+      },
+    ],
+  });
+
+  assert.deepEqual(request.contents, [
+    { role: "user", parts: [{ text: "Review the implementation." }] },
+    { role: "model", parts: [{ text: "I completed the first pass." }] },
+    { role: "user", parts: [{ text: "Continue with the failing test." }] },
+  ]);
+});
+
+test("Gemini adapter keeps system and developer instructions separate", () => {
+  const request = responsesToGeminiGenerateContent({
+    model: "gemini-3.6-flash",
+    instructions: "Use the available tools.",
+    input: [
+      { role: "system", content: "System policy." },
+      { role: "developer", content: "Developer guidance." },
+      { role: "assistant", content: "Prior assistant output." },
+      { type: "agent_message", content: "New delegated task." },
+    ],
+  });
+
+  assert.deepEqual(request.systemInstruction, {
+    parts: [
+      {
+        text: "Use the available tools.\n\nSystem policy.\n\nDeveloper guidance.",
+      },
+    ],
+  });
+  assert.deepEqual(request.contents, [
+    { role: "model", parts: [{ text: "Prior assistant output." }] },
+    { role: "user", parts: [{ text: "New delegated task." }] },
+  ]);
+});
+
 test("Gemini adapter fails no-candidate responses with prompt feedback", () => {
   const response = geminiToResponses(
     NATIVE_PROMPT_BLOCKED_RESPONSE,
