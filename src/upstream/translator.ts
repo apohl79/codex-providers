@@ -78,14 +78,31 @@ const EFFORT_TO_BUDGET: Record<string, number> = {
   medium: 8192,
   high: 24576,
   xhigh: 32768,
+  // Legacy Claude models do not accept adaptive effort. Treat max as the
+  // highest fixed budget when a caller sends it to one of those models.
+  max: 32768,
 };
+
+const ADAPTIVE_THINKING_MODELS = new Set([
+  "claude-opus-4-6",
+  "claude-opus-4-7",
+  "claude-opus-4-8",
+  "claude-opus-5",
+  "claude-sonnet-4-6",
+  "claude-sonnet-5",
+  "claude-fable-5",
+]);
+
+function supportsAdaptiveThinking(model: string): boolean {
+  return ADAPTIVE_THINKING_MODELS.has(model.toLowerCase());
+}
 
 function applyThinking(
   anthropicBody: any,
   effort: string,
   summary?: string,
 ): void {
-  if (anthropicBody.model === "claude-opus-5") {
+  if (supportsAdaptiveThinking(anthropicBody.model)) {
     if (effort === "none") {
       anthropicBody.thinking = { type: "disabled" };
       return;

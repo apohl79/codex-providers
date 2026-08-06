@@ -367,14 +367,15 @@ Token budget choices in the wizard:
 | Small context             | `200000`               | `180000`                         |
 | Tiny context              | `128000`               | `115200`                         |
 
-Reasoning level choices in the wizard:
+Reasoning level choices in the wizard (Claude profiles support `max` on adaptive-thinking models; DeepSeek and Gemini retain the first four levels):
 
-| Choice                      | Anthropic thinking budget |
-| --------------------------- | ------------------------- |
-| Low reasoning               | `1024` tokens             |
-| Medium reasoning (recommended) | `8192` tokens          |
-| High reasoning              | `24576` tokens            |
-| Extra-high reasoning        | `32768` tokens            |
+| Choice                          | Anthropic thinking budget |
+| ------------------------------ | ------------------------- |
+| Low reasoning                  | `1024` tokens             |
+| Medium reasoning (recommended) | `8192` tokens             |
+| High reasoning                 | `24576` tokens            |
+| Extra-high reasoning           | `32768` tokens            |
+| Maximum reasoning              | Anthropic adaptive `max` |
 
 ### System prompts
 

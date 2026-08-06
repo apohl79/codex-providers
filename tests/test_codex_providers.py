@@ -340,6 +340,54 @@ class ClaudeOpus5SupportTest(unittest.TestCase):
             {"input": 5.0, "cached_input": 0.50, "output": 25.0},
         )
 
+    def test_adaptive_claude_catalog_exposes_max_reasoning(self) -> None:
+        catalog = codex_manager.build_catalog(
+            ("claude-opus-4-8",),
+            codex_manager.BACKENDS["claude"],
+            {"models": []},
+            400000,
+            "max",
+        )
+        model = catalog["models"][0]
+
+        self.assertEqual(model["default_reasoning_level"], "max")
+        self.assertEqual(
+            [level["effort"] for level in model["supported_reasoning_levels"]],
+            ["low", "medium", "high", "xhigh", "max"],
+        )
+
+    def test_legacy_claude_catalog_does_not_expose_max_reasoning(self) -> None:
+        catalog = codex_manager.build_catalog(
+            ("claude-haiku-4-5-20251001",),
+            codex_manager.BACKENDS["claude"],
+            {"models": []},
+            400000,
+            "max",
+        )
+        model = catalog["models"][0]
+
+        self.assertEqual(model["default_reasoning_level"], "medium")
+        self.assertNotIn(
+            "max",
+            [level["effort"] for level in model["supported_reasoning_levels"]],
+        )
+
+    def test_non_claude_catalog_does_not_expose_max_reasoning(self) -> None:
+        catalog = codex_manager.build_catalog(
+            ("deepseek-v4-pro",),
+            codex_manager.BACKENDS["deepseek"],
+            {"models": []},
+            400000,
+            "max",
+        )
+        model = catalog["models"][0]
+
+        self.assertEqual(model["default_reasoning_level"], "medium")
+        self.assertNotIn(
+            "max",
+            [level["effort"] for level in model["supported_reasoning_levels"]],
+        )
+
 
 class GeminiProxyBackendTest(unittest.TestCase):
     def test_gemini_backend_uses_google_for_codex_and_auth2api(self) -> None:
@@ -630,6 +678,29 @@ class CommandLineIdentityTest(unittest.TestCase):
 
         self.assertEqual(error.exception.code, 0)
         self.assertIn("usage: codex-providers", output.getvalue())
+
+    def test_claude_accepts_max_reasoning_level(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            ["codex-providers", "--preset", "claude", "--reasoning-level", "max"],
+        ):
+            args = codex_manager.parse_args()
+
+        self.assertEqual(args.reasoning_level, "max")
+
+    def test_non_claude_rejects_max_reasoning_level(self) -> None:
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["codex-providers", "--preset", "deepseek", "--reasoning-level", "max"],
+            ),
+            self.assertRaises(SystemExit) as error,
+        ):
+            codex_manager.parse_args()
+
+        self.assertEqual(error.exception.code, 2)
 
 
 class FastModelSelectionTest(unittest.TestCase):
