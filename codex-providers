@@ -339,7 +339,7 @@ The user's terminal is the primary surface. Be concise enough for CLI reading, b
 Final answers should be shorter than the work behind them. Include the most important file references, test results, commit or push identifiers when relevant, and any limitation that affects the user's next action.
 """.strip()
 
-REASONING_LEVELS = (
+BASE_REASONING_LEVELS = (
     ReasoningLevel(
         "low",
         "Low reasoning",
@@ -361,6 +361,22 @@ REASONING_LEVELS = (
         "Maps to 32768 Anthropic thinking tokens. Largest configured budget for hard tasks.",
     ),
 )
+CLAUDE_ADAPTIVE_REASONING_MODELS = frozenset(
+    {
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-opus-5",
+        "claude-sonnet-4-6",
+        "claude-sonnet-5",
+        "claude-fable-5",
+    }
+)
+CLAUDE_MAX_REASONING = ReasoningLevel(
+    "max",
+    "Maximum reasoning",
+    "Uses Anthropic adaptive effort max on Claude models that support it.",
+)
+REASONING_LEVELS = (*BASE_REASONING_LEVELS, CLAUDE_MAX_REASONING)
 REASONING_BY_EFFORT = {level.effort: level for level in REASONING_LEVELS}
 
 
@@ -934,27 +950,66 @@ def with_catalog_limits(entry: dict, context_window: int) -> dict:
     return updated
 
 
-def reasoning_level_entries() -> list[dict[str, str]]:
+def supports_adaptive_reasoning(backend: Backend, model: str) -> bool:
+    if backend.key != "claude":
+        return False
+    return canonical_model(model).lower() in CLAUDE_ADAPTIVE_REASONING_MODELS
+
+
+def reasoning_levels_for_models(
+    backend: Backend,
+    selected_models: tuple[str, ...] | list[str] | None = None,
+) -> tuple[ReasoningLevel, ...]:
+    if backend.key == "claude" and (
+        selected_models is None
+        or any(supports_adaptive_reasoning(backend, model) for model in selected_models)
+    ):
+        return REASONING_LEVELS
+    return BASE_REASONING_LEVELS
+
+
+def reasoning_level_entries(backend: Backend, model: str | None = None) -> list[dict[str, str]]:
+    levels = (
+        reasoning_levels_for_models(backend, (model,))
+        if model is not None
+        else reasoning_levels_for_models(backend)
+    )
     return [
         {"effort": level.effort, "description": level.description}
-        for level in REASONING_LEVELS
+        for level in levels
     ]
 
 
-def with_catalog_reasoning(entry: dict, default_reasoning_level: str) -> dict:
+def with_catalog_reasoning(
+    entry: dict,
+    default_reasoning_level: str,
+    backend: Backend,
+    model: str,
+) -> dict:
     updated = dict(entry)
+    levels = reasoning_levels_for_models(backend, (model,))
+    supported_efforts = {level.effort for level in levels}
+    if default_reasoning_level not in supported_efforts:
+        default_reasoning_level = DEFAULT_REASONING_LEVEL
     updated["default_reasoning_level"] = default_reasoning_level
-    updated["supported_reasoning_levels"] = reasoning_level_entries()
+    updated["supported_reasoning_levels"] = reasoning_level_entries(backend, model)
     return updated
 
 
-def catalog_default_reasoning_level(source_catalog: dict, selected_models: tuple[str, ...]) -> str:
+def catalog_default_reasoning_level(
+    source_catalog: dict,
+    selected_models: tuple[str, ...],
+    backend: Backend,
+) -> str:
     by_slug = catalog_entries_by_slug(source_catalog)
     entries = [by_slug[model] for model in selected_models if model in by_slug]
     entries.extend(entry for slug, entry in by_slug.items() if slug not in selected_models)
+    supported_efforts = {
+        level.effort for level in reasoning_levels_for_models(backend, selected_models)
+    }
     for entry in entries:
         level = entry.get("default_reasoning_level")
-        if isinstance(level, str) and level in REASONING_BY_EFFORT:
+        if isinstance(level, str) and level in supported_efforts:
             return level
     return DEFAULT_REASONING_LEVEL
 
@@ -997,11 +1052,14 @@ def with_catalog_schema(entry: dict, backend: Backend) -> dict:
     return updated
 
 
-def reasoning_level_index(default_reasoning_level: str) -> int:
-    for index, level in enumerate(REASONING_LEVELS):
+def reasoning_level_index(
+    default_reasoning_level: str,
+    levels: tuple[ReasoningLevel, ...] = REASONING_LEVELS,
+) -> int:
+    for index, level in enumerate(levels):
         if level.effort == default_reasoning_level:
             return index
-    return reasoning_level_index(DEFAULT_REASONING_LEVEL)
+    return reasoning_level_index(DEFAULT_REASONING_LEVEL, levels)
 
 
 def fallback_model_entry(
@@ -1024,7 +1082,12 @@ def fallback_model_entry(
         }
     )
     return adapt_catalog_entry(
-        with_catalog_reasoning(with_catalog_limits(entry, context_window), default_reasoning_level),
+        with_catalog_reasoning(
+            with_catalog_limits(entry, context_window),
+            default_reasoning_level,
+            backend,
+            slug,
+        ),
         backend,
         slug,
     )
@@ -1053,7 +1116,12 @@ def build_catalog(
             )
             entries.append(
                 adapt_catalog_entry(
-                    with_catalog_reasoning(with_catalog_limits(entry, context_window), default_reasoning_level),
+                    with_catalog_reasoning(
+                        with_catalog_limits(entry, context_window),
+                        default_reasoning_level,
+                        backend,
+                        model,
+                    ),
                     backend,
                     model,
                 )
@@ -2108,14 +2176,25 @@ def choose_draft(
     )
     fast_model = selected_models[fast_index]
 
-    current_reasoning_level = args.reasoning_level or catalog_default_reasoning_level(source_catalog, selected_models)
+    reasoning_levels = reasoning_levels_for_models(backend, selected_models)
+    if args.reasoning_level and args.reasoning_level not in {
+        level.effort for level in reasoning_levels
+    }:
+        raise SystemExit(
+            f"Error: reasoning level {args.reasoning_level!r} is not supported by the selected {backend.label} models."
+        )
+    current_reasoning_level = args.reasoning_level or catalog_default_reasoning_level(
+        source_catalog,
+        selected_models,
+        backend,
+    )
     reasoning_index = ui.menu(
         "Reasoning Level",
         "Codex uses this as the default reasoning effort for generated model catalog entries.",
-        [(level.label, level.description) for level in REASONING_LEVELS],
-        reasoning_level_index(current_reasoning_level),
+        [(level.label, level.description) for level in reasoning_levels],
+        reasoning_level_index(current_reasoning_level, reasoning_levels),
     )
-    reasoning_level = REASONING_LEVELS[reasoning_index].effort
+    reasoning_level = reasoning_levels[reasoning_index].effort
 
     budget_choice = ui.menu(
         "Token Budget",
@@ -2244,7 +2323,18 @@ def noninteractive_draft(
     )
     context_window = int(args.context_window or (catalog_source_context.context_window if catalog_source_context else DEFAULT_CONTEXT_WINDOW))
     compact_limit = int(args.compact_limit or (catalog_source_context.compact_limit if catalog_source_context else DEFAULT_COMPACT_LIMIT))
-    reasoning_level = args.reasoning_level or catalog_default_reasoning_level(source_catalog, selected_models)
+    reasoning_levels = reasoning_levels_for_models(backend, selected_models)
+    if args.reasoning_level and args.reasoning_level not in {
+        level.effort for level in reasoning_levels
+    }:
+        raise SystemExit(
+            f"Error: reasoning level {args.reasoning_level!r} is not supported by the selected {backend.label} models."
+        )
+    reasoning_level = args.reasoning_level or catalog_default_reasoning_level(
+        source_catalog,
+        selected_models,
+        backend,
+    )
     max_concurrent_threads_per_session = (
         args.max_concurrent_threads_per_session
         or parse_multi_agent_v2_threads(codex_config)
@@ -2375,8 +2465,17 @@ def parse_args() -> argparse.Namespace:
     args.preset = args.preset.lower()
     if args.context or args.provider:
         parser.error("--context and --provider are no longer supported.")
-    if args.reasoning_level and args.reasoning_level not in REASONING_BY_EFFORT:
-        parser.error("--reasoning-level must be one of: " + ", ".join(REASONING_BY_EFFORT))
+    if args.reasoning_level:
+        supported_efforts = tuple(
+            level.effort for level in reasoning_levels_for_models(BACKENDS[args.preset])
+        )
+        if args.reasoning_level not in supported_efforts:
+            parser.error(
+                "--reasoning-level for "
+                + args.preset
+                + " must be one of: "
+                + ", ".join(supported_efforts)
+            )
     if args.max_concurrent_threads_per_session is None:
         env_threads = os.environ.get("CODEX_MAX_CONCURRENT_THREADS_PER_SESSION")
         if env_threads:

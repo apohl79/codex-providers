@@ -518,8 +518,8 @@ test("openaiToAnthropic translates reasoning_effort to thinking", () => {
     reasoning_effort: "high",
     messages: [{ role: "user", content: "hi" }],
   });
-  assert.equal(result.thinking.type, "enabled");
-  assert.equal(result.thinking.budget_tokens, 24576);
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "high" });
 });
 
 test("openaiToAnthropic uses adaptive thinking for Claude Opus 5", () => {
@@ -961,9 +961,28 @@ test("responsesToAnthropic translates reasoning with summary", () => {
     input: [{ role: "user", content: "hi" }],
     reasoning: { effort: "high", summary: "concise" },
   });
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "high" });
+});
+
+test("responsesToAnthropic uses max adaptive effort for Claude Opus 4.8", () => {
+  const result = responsesToAnthropic({
+    model: "opus-4.8",
+    reasoning: { effort: "max" },
+    input: [{ role: "user", content: "hi" }],
+  });
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "max" });
+});
+
+test("responsesToAnthropic falls back to the highest fixed budget for legacy Claude models", () => {
+  const result = responsesToAnthropic({
+    model: "haiku",
+    reasoning: { effort: "max" },
+    input: [{ role: "user", content: "hi" }],
+  });
   assert.equal(result.thinking.type, "enabled");
-  assert.equal(result.thinking.budget_tokens, 24576);
-  assert.equal(result.thinking.display, "summarized");
+  assert.equal(result.thinking.budget_tokens, 32768);
 });
 
 test("responsesToAnthropic uses adaptive thinking for Claude Opus 5", () => {
@@ -1317,7 +1336,8 @@ test("responsesToAnthropic appends user continuation after trailing agent messag
       },
     ],
   });
-  assert.equal(result.thinking.type, "enabled");
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "high" });
   assert.deepEqual(result.messages, [
     { role: "user", content: "hi" },
     {
@@ -1334,7 +1354,8 @@ test("responsesToAnthropic leaves trailing user turn untouched with thinking", (
     reasoning: { effort: "high" },
     input: [{ role: "user", content: "hi" }],
   });
-  assert.equal(result.thinking.type, "enabled");
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "high" });
   assert.deepEqual(result.messages, [{ role: "user", content: "hi" }]);
 });
 
@@ -1368,7 +1389,8 @@ test("responsesToAnthropic does not append continuation after unanswered tool_us
       },
     ],
   });
-  assert.equal(result.thinking.type, "enabled");
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "high" });
   const last = result.messages[result.messages.length - 1];
   assert.equal(last.role, "assistant");
   assert.equal(last.content[0].type, "tool_use");
