@@ -993,6 +993,7 @@ test("responsesToAnthropic uses adaptive thinking for Claude Opus 5", () => {
   });
   assert.deepEqual(result.thinking, { type: "adaptive" });
   assert.deepEqual(result.output_config, { effort: "xhigh" });
+  assert.equal(result.max_tokens, 36864);
 });
 
 test("responsesToAnthropic replays reasoning before a DeepSeek tool call", () => {

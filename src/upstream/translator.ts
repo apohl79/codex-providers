@@ -83,6 +83,9 @@ const EFFORT_TO_BUDGET: Record<string, number> = {
   max: 32768,
 };
 
+const DEFAULT_MAX_TOKENS = 8192;
+const THINKING_OUTPUT_TOKEN_HEADROOM = 4096;
+
 const ADAPTIVE_THINKING_MODELS = new Set([
   "claude-opus-4-6",
   "claude-opus-4-7",
@@ -101,6 +104,7 @@ function applyThinking(
   anthropicBody: any,
   effort: string,
   summary?: string,
+  usingDefaultMaxTokens = false,
 ): void {
   if (supportsAdaptiveThinking(anthropicBody.model)) {
     if (effort === "none") {
@@ -112,6 +116,11 @@ function applyThinking(
       ...(anthropicBody.output_config || {}),
       effort,
     };
+    if (usingDefaultMaxTokens) {
+      anthropicBody.max_tokens =
+        (EFFORT_TO_BUDGET[effort] || DEFAULT_MAX_TOKENS) +
+        THINKING_OUTPUT_TOKEN_HEADROOM;
+    }
     return;
   }
   if (effort === "none") {
@@ -122,7 +131,7 @@ function applyThinking(
   if (budget) {
     anthropicBody.thinking = { type: "enabled", budget_tokens: budget };
     if (anthropicBody.max_tokens <= budget) {
-      anthropicBody.max_tokens = budget + 4096;
+      anthropicBody.max_tokens = budget + THINKING_OUTPUT_TOKEN_HEADROOM;
     }
   } else {
     anthropicBody.thinking = { type: "enabled", budget_tokens: 8192 };
@@ -301,7 +310,8 @@ function appendToolResultContent(messages: any[], content: any): void {
 export function openaiToAnthropic(body: any): any {
   const anthropicBody: any = {
     model: resolveModel(body.model || "claude-sonnet-5"),
-    max_tokens: body.max_completion_tokens || body.max_tokens || 8192,
+    max_tokens:
+      body.max_completion_tokens || body.max_tokens || DEFAULT_MAX_TOKENS,
     stream: !!body.stream,
   };
 
@@ -315,7 +325,12 @@ export function openaiToAnthropic(body: any): any {
 
   // Thinking / reasoning
   if (body.reasoning_effort) {
-    applyThinking(anthropicBody, body.reasoning_effort);
+    applyThinking(
+      anthropicBody,
+      body.reasoning_effort,
+      undefined,
+      body.max_completion_tokens === undefined && body.max_tokens === undefined,
+    );
   }
 
   const messages: any[] = [];
@@ -854,7 +869,7 @@ export function responsesToAnthropic(body: any): any {
   const model = resolveModel(body.model || "claude-sonnet-5");
   const anthropicBody: any = {
     model,
-    max_tokens: body.max_output_tokens || 8192,
+    max_tokens: body.max_output_tokens || DEFAULT_MAX_TOKENS,
     stream: !!body.stream,
   };
 
@@ -866,7 +881,12 @@ export function responsesToAnthropic(body: any): any {
   const effort = body.reasoning?.effort;
   const summary = body.reasoning?.summary;
   if (effort && effort !== "none") {
-    applyThinking(anthropicBody, effort, summary);
+    applyThinking(
+      anthropicBody,
+      effort,
+      summary,
+      body.max_output_tokens === undefined,
+    );
   }
 
   // text.format → output_config or system hint
