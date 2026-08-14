@@ -955,6 +955,23 @@ test("responsesToAnthropic translates instructions to system", () => {
   assert.deepEqual(result.system, [{ type: "text", text: "Be helpful" }]);
 });
 
+test("responsesToAnthropic translates developer input to system", () => {
+  const result = responsesToAnthropic({
+    model: "opus",
+    input: [
+      {
+        role: "developer",
+        content: [{ type: "input_text", text: "Follow the thread contract" }],
+      },
+      { role: "user", content: "hi" },
+    ],
+  });
+  assert.deepEqual(result.system, [
+    { type: "text", text: "Follow the thread contract" },
+  ]);
+  assert.deepEqual(result.messages, [{ role: "user", content: "hi" }]);
+});
+
 test("responsesToAnthropic translates reasoning with summary", () => {
   const result = responsesToAnthropic({
     model: "sonnet",

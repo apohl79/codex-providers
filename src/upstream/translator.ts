@@ -946,7 +946,7 @@ export function responsesToAnthropic(body: any): any {
       continue;
     }
 
-    if (role === "system") {
+    if (role === "system" || role === "developer") {
       const text = extractText(item.content);
       if (text) {
         if (!anthropicBody.system) anthropicBody.system = [];
