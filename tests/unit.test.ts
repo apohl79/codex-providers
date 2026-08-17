@@ -537,6 +537,7 @@ test("openaiToAnthropic uses adaptive thinking for Claude Opus 5", () => {
     effort: "medium",
     format: { type: "json_schema", schema: { type: "object" }, name: "answer" },
   });
+  assert.equal(result.max_tokens, 65536);
 });
 
 test("openaiToAnthropic replays DeepSeek reasoning_content with tool calls", () => {
@@ -978,7 +979,10 @@ test("responsesToAnthropic translates reasoning with summary", () => {
     input: [{ role: "user", content: "hi" }],
     reasoning: { effort: "high", summary: "concise" },
   });
-  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.thinking, {
+    type: "adaptive",
+    display: "summarized",
+  });
   assert.deepEqual(result.output_config, { effort: "high" });
 });
 
@@ -1005,12 +1009,26 @@ test("responsesToAnthropic falls back to the highest fixed budget for legacy Cla
 test("responsesToAnthropic uses adaptive thinking for Claude Opus 5", () => {
   const result = responsesToAnthropic({
     model: "claude-opus-5",
-    reasoning: { effort: "xhigh", summary: "concise" },
+    reasoning: { effort: "xhigh", summary: "auto" },
     input: [{ role: "user", content: "hi" }],
   });
-  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.thinking, {
+    type: "adaptive",
+    display: "summarized",
+  });
   assert.deepEqual(result.output_config, { effort: "xhigh" });
-  assert.equal(result.max_tokens, 36864);
+  assert.equal(result.max_tokens, 65536);
+});
+
+test("responsesToAnthropic preserves explicit adaptive output limits", () => {
+  const result = responsesToAnthropic({
+    model: "claude-opus-5",
+    max_output_tokens: 20000,
+    reasoning: { effort: "medium", summary: "auto" },
+    input: [{ role: "user", content: "hi" }],
+  });
+
+  assert.equal(result.max_tokens, 20000);
 });
 
 test("responsesToAnthropic replays reasoning before a DeepSeek tool call", () => {
@@ -1023,7 +1041,7 @@ test("responsesToAnthropic replays reasoning before a DeepSeek tool call", () =>
         type: "reasoning",
         id: "rs_1",
         summary: [{ type: "summary_text", text: "I need to call weather." }],
-        signature: "sig_1",
+        encrypted_content: "sig_1",
       },
       {
         type: "function_call",
@@ -1066,6 +1084,34 @@ test("responsesToAnthropic replays reasoning before a DeepSeek tool call", () =>
   ]);
 });
 
+test("responsesToAnthropic replays omitted encrypted thinking for continuation", () => {
+  const result = responsesToAnthropic({
+    model: "claude-opus-5",
+    reasoning: { effort: "medium", summary: "auto" },
+    input: [
+      { role: "user", content: "Review this change" },
+      {
+        type: "reasoning",
+        id: "rs_1",
+        summary: [],
+        encrypted_content: "sig_omitted",
+      },
+    ],
+  });
+
+  assert.deepEqual(result.messages, [
+    { role: "user", content: "Review this change" },
+    {
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "", signature: "sig_omitted" }],
+    },
+    {
+      role: "user",
+      content: [{ type: "text", text: "Continue." }],
+    },
+  ]);
+});
+
 test("responsesToAnthropic groups parallel tool results immediately after tool calls", () => {
   const result = responsesToAnthropic({
     model: "deepseek-v4-pro",
@@ -1103,12 +1149,10 @@ test("responsesToAnthropic groups parallel tool results immediately after tool c
   });
 });
 
-test("anthropicToResponses preserves thinking signatures for replay", () => {
+test("anthropicToResponses preserves omitted thinking signatures for replay", () => {
   const result = anthropicToResponses(
     {
-      content: [
-        { type: "thinking", thinking: "Need a tool.", signature: "sig_2" },
-      ],
+      content: [{ type: "thinking", thinking: "", signature: "sig_2" }],
       stop_reason: "end_turn",
     },
     "deepseek-v4-pro",
@@ -1122,8 +1166,8 @@ test("anthropicToResponses preserves thinking signatures for replay", () => {
     content: [
       {
         type: "reasoning",
-        summary: [{ type: "summary_text", text: "Need a tool." }],
-        signature: "sig_2",
+        summary: [],
+        encrypted_content: "sig_2",
       },
     ],
   });
@@ -1562,6 +1606,50 @@ test("anthropicSSEToResponses handles text streaming", () => {
   assert.deepEqual(outputItemDone?.item.content, [
     { type: "output_text", text: "Hello", annotations: [] },
   ]);
+});
+
+test("anthropicSSEToResponses preserves omitted thinking signatures", () => {
+  const state = makeResponsesState();
+  const usage: UsageData = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+  };
+  anthropicSSEToResponses(
+    "content_block_start",
+    {
+      content_block: { type: "thinking", thinking: "", signature: "" },
+      index: 0,
+    },
+    state,
+    "opus-5",
+    usage,
+  );
+  const signatureEvents = anthropicSSEToResponses(
+    "content_block_delta",
+    { delta: { type: "signature_delta", signature: "sig_stream" }, index: 0 },
+    state,
+    "opus-5",
+    usage,
+  );
+  const stopEvents = anthropicSSEToResponses(
+    "content_block_stop",
+    { index: 0 },
+    state,
+    "opus-5",
+    usage,
+  );
+  const outputItemDone = stopEvents
+    .map(parseResponsesSSE)
+    .find((event) => event.type === "response.output_item.done");
+
+  assert.deepEqual(signatureEvents, []);
+  assert.match(outputItemDone?.item.id, /^rs_/);
+  assert.equal(outputItemDone?.item.type, "reasoning");
+  assert.equal(outputItemDone?.item.status, "completed");
+  assert.deepEqual(outputItemDone?.item.summary, []);
+  assert.equal(outputItemDone?.item.encrypted_content, "sig_stream");
 });
 
 test("anthropicSSEToResponses maps streaming apply_patch to custom tool call", () => {

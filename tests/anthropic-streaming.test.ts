@@ -54,8 +54,9 @@ async function requestStream(
   server: http.Server,
 ): Promise<{ status: number; body: string }> {
   const payload = JSON.stringify({
-    model: "claude-sonnet-4",
+    model: "claude-opus-5",
     input: [{ role: "user", content: "Review this change" }],
+    reasoning: { effort: "medium", summary: "auto" },
     stream: true,
   });
   return new Promise((resolve, reject) => {
@@ -89,14 +90,14 @@ function truncatedAnthropicStream(): string {
   return [
     'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_truncated","type":"message","role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":69360,"output_tokens":1}}}\n\n',
     'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}\n\n',
-    'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Still reviewing"}}\n\n',
+    'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_omitted"}}\n\n',
     'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
     'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"input_tokens":69360,"output_tokens":8192,"cache_read_input_tokens":7857}}\n\n',
     'event: message_stop\ndata: {"type":"message_stop"}\n\n',
   ].join("");
 }
 
-test("reports reasoning-only Anthropic stream truncation as incomplete", async (t) => {
+test("preserves omitted reasoning when Anthropic truncates the stream", async (t) => {
   const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-stream-"));
   const originalFetch = global.fetch;
   global.fetch = async (input, init) => {
@@ -108,10 +109,22 @@ test("reports reasoning-only Anthropic stream truncation as incomplete", async (
     const body = JSON.parse(String(init?.body)) as {
       max_tokens: number;
       stream: boolean;
+      thinking: { type: string; display: string };
+      output_config: { effort: string };
     };
     assert.deepEqual(
-      { maxTokens: body.max_tokens, stream: body.stream },
-      { maxTokens: 8192, stream: true },
+      {
+        maxTokens: body.max_tokens,
+        stream: body.stream,
+        thinking: body.thinking,
+        outputConfig: body.output_config,
+      },
+      {
+        maxTokens: 65536,
+        stream: true,
+        thinking: { type: "adaptive", display: "summarized" },
+        outputConfig: { effort: "medium" },
+      },
     );
     return new Response(truncatedAnthropicStream(), {
       status: 200,
@@ -128,7 +141,7 @@ test("reports reasoning-only Anthropic stream truncation as incomplete", async (
   const response = await requestStream(server);
 
   assert.equal(response.status, 200);
-  assert.match(response.body, /event: response\.reasoning_summary_text\.delta/);
+  assert.match(response.body, /"encrypted_content":"sig_omitted"/);
   assert.match(response.body, /event: response\.incomplete/);
   assert.match(
     response.body,

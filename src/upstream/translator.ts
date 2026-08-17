@@ -84,6 +84,7 @@ const EFFORT_TO_BUDGET: Record<string, number> = {
 };
 
 const DEFAULT_MAX_TOKENS = 8192;
+const DEFAULT_ADAPTIVE_MAX_TOKENS = 65536;
 const THINKING_OUTPUT_TOKEN_HEADROOM = 4096;
 
 const ADAPTIVE_THINKING_MODELS = new Set([
@@ -111,15 +112,16 @@ function applyThinking(
       anthropicBody.thinking = { type: "disabled" };
       return;
     }
-    anthropicBody.thinking = { type: "adaptive" };
+    anthropicBody.thinking = {
+      type: "adaptive",
+      ...(summary ? { display: "summarized" } : {}),
+    };
     anthropicBody.output_config = {
       ...(anthropicBody.output_config || {}),
       effort,
     };
     if (usingDefaultMaxTokens) {
-      anthropicBody.max_tokens =
-        (EFFORT_TO_BUDGET[effort] || DEFAULT_MAX_TOKENS) +
-        THINKING_OUTPUT_TOKEN_HEADROOM;
+      anthropicBody.max_tokens = DEFAULT_ADAPTIVE_MAX_TOKENS;
     }
     return;
   }
@@ -136,7 +138,7 @@ function applyThinking(
   } else {
     anthropicBody.thinking = { type: "enabled", budget_tokens: 8192 };
   }
-  if (summary && summary !== "auto") {
+  if (summary) {
     anthropicBody.thinking.display = "summarized";
   }
 }
@@ -269,10 +271,16 @@ function responsesReasoningText(item: any): string {
 
 function anthropicThinkingFromResponsesReasoning(item: any): any | null {
   const thinking = responsesReasoningText(item);
-  if (!thinking) return null;
+  const signature =
+    typeof item?.encrypted_content === "string"
+      ? item.encrypted_content
+      : typeof item?.signature === "string"
+        ? item.signature
+        : "";
+  if (!thinking && !signature) return null;
 
   const block: any = { type: "thinking", thinking };
-  if (item.signature !== undefined) block.signature = item.signature;
+  if (signature) block.signature = signature;
   return block;
 }
 
@@ -1052,12 +1060,15 @@ export function anthropicToResponses(anthropicResp: any, model: string): any {
         text: block.text,
         annotations: [],
       });
-    } else if (block.type === "thinking" && block.thinking) {
+    } else if (block.type === "thinking") {
       const reasoning: any = {
         type: "reasoning",
-        summary: [{ type: "summary_text", text: block.thinking }],
+        summary: block.thinking
+          ? [{ type: "summary_text", text: block.thinking }]
+          : [],
       };
-      if (block.signature !== undefined) reasoning.signature = block.signature;
+      if (block.signature !== undefined)
+        reasoning.encrypted_content = block.signature;
       contentParts.push(reasoning);
     } else if (block.type === "tool_use") {
       if (block.name === "apply_patch") {
@@ -1136,6 +1147,7 @@ export interface ResponsesStreamState {
   currentText: string;
   currentToolArgs: string;
   currentThinkingText: string;
+  currentThinkingSignature: string;
   currentReasoningId: string;
   stopReason: string;
 }
@@ -1155,6 +1167,7 @@ export function makeResponsesState(): ResponsesStreamState {
     currentText: "",
     currentToolArgs: "",
     currentThinkingText: "",
+    currentThinkingSignature: "",
     currentReasoningId: "",
     stopReason: "",
   };
@@ -1231,6 +1244,7 @@ const responsesSSEHandlers: Record<string, ResponsesSSEHandler> = {
     if (block?.type === "thinking") {
       state.inThinkingBlock = true;
       state.currentThinkingText = "";
+      state.currentThinkingSignature = block.signature || "";
       state.currentReasoningId = `rs_${compactUuid()}`;
       return [
         formatSSE({
@@ -1331,6 +1345,11 @@ const responsesSSEHandlers: Record<string, ResponsesSSEHandler> = {
       ];
     }
 
+    if (deltaType === "signature_delta") {
+      state.currentThinkingSignature += data.delta.signature;
+      return [];
+    }
+
     if (deltaType === "input_json_delta") {
       state.currentToolArgs += data.delta.partial_json;
       if (state.currentToolIsCustom) return [];
@@ -1422,14 +1441,18 @@ const responsesSSEHandlers: Record<string, ResponsesSSEHandler> = {
             id: state.currentReasoningId,
             type: "reasoning",
             status: "completed",
-            summary: [
-              { type: "summary_text", text: state.currentThinkingText },
-            ],
+            summary: state.currentThinkingText
+              ? [{ type: "summary_text", text: state.currentThinkingText }]
+              : [],
+            ...(state.currentThinkingSignature
+              ? { encrypted_content: state.currentThinkingSignature }
+              : {}),
           },
         }),
       );
       state.inThinkingBlock = false;
       state.currentThinkingText = "";
+      state.currentThinkingSignature = "";
     } else if (state.inToolBlock) {
       if (state.currentToolIsCustom) {
         const input = customToolInputFromJson(state.currentToolArgs);
