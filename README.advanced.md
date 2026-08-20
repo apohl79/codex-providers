@@ -296,7 +296,6 @@ For quick start and non-interactive setup, see [README.md](README.md). `codex-pr
 - `~/.codex/config.toml` — provider block and MultiAgentV2 settings
 - `~/.codex/{claude,deepseek}.config.toml` — context with model, fast model, catalog path, context window
 - `~/.codex/{claude,deepseek}-models.json` — model catalog with backend-specific `base_instructions` from `docs/prompts/`
-- `~/.codex/agents/general-purpose-{gpt,claude,deepseek,gemini}.toml` — agent definitions whose `developer_instructions` contain only `docs/prompts/subagents.md`
 
 ### Codex config for sub-agents and cross-provider calls
 
@@ -351,8 +350,8 @@ The important parts are:
 - `max_concurrent_threads_per_session` controls how many sub-agent threads Codex
   may run concurrently in one session; `codex-providers` asks for this in the
   wizard and defaults to `8` in non-interactive mode.
-- GPT/Codex sub-agent roles should continue to use the normal OpenAI/Codex
-  provider, while the Claude profile uses the `anthropic` provider above.
+- Choose a different sub-agent model directly when spawning it; the Claude
+  profile continues to use the `anthropic` provider above.
 
 Cross-provider Claude→GPT sub-agent calls also require the apohl79 Codex fork,
 or another Codex build with equivalent cross-provider sub-agent support. Older
@@ -379,7 +378,7 @@ Reasoning level choices in the wizard (Claude profiles support `max` on adaptive
 
 ### System prompts
 
-`codex-providers` reads backend-specific system prompts from `docs/prompts/` and writes them into generated Codex model catalogs. Generated agent definitions use only the shared sub-agent instructions:
+`codex-providers` reads backend-specific system prompts from `docs/prompts/` and writes them into generated Codex model catalogs:
 
 | File | Backend | Purpose |
 | ---- | ------- | ------- |
@@ -387,7 +386,6 @@ Reasoning level choices in the wizard (Claude profiles support `max` on adaptive
 | `docs/prompts/claude.md` | Anthropic (Claude) | Used for Claude model entries |
 | `docs/prompts/deepseek.md` | DeepSeek | Used for DeepSeek model entries |
 | `docs/prompts/gemini.md` | Gemini | Used for Gemini model entries |
-| `docs/prompts/subagents.md` | All sub-agents | Sole content of generated `general-purpose-*` agent `developer_instructions` |
 
 The model prompts share the same Codex tool discipline (task completion, autonomy tiers, repository work, destructive action safeguards, git hygiene) but differ in communication style and emphasis:
 

@@ -96,12 +96,6 @@ class Draft:
     dry_run: bool
 
 
-@dataclass(frozen=True)
-class AgentDefinition:
-    path: Path
-    content: str
-
-
 MenuItem = Union[tuple[str, str], tuple[str, str, bool]]
 
 
@@ -165,7 +159,6 @@ DEFAULT_CONTEXT_WINDOW = 400000
 DEFAULT_COMPACT_LIMIT = 360000
 DEFAULT_REASONING_LEVEL = "medium"
 DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION = 8
-OPENAI_GENERAL_AGENT_MODEL = "gpt-5.6-sol"
 CATALOG_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100
 MULTI_AGENT_V2_FEATURE_TABLE = "features.multi_agent_v2"
 
@@ -181,13 +174,6 @@ def load_prompt(repo_dir: Path, backend_key: str) -> str:
     if not path.exists():
         raise FileNotFoundError(f"Prompt file not found: {path}")
     return path.read_text().strip()
-
-
-def load_subagent_prompt(repo_dir: Path) -> str:
-    extension_path = repo_dir / "docs" / "prompts" / "subagents.md"
-    if not extension_path.exists():
-        raise FileNotFoundError(f"Subagent prompt file not found: {extension_path}")
-    return extension_path.read_text().strip()
 
 
 GENERAL_AGENT_INSTRUCTIONS = """
@@ -1482,57 +1468,6 @@ def context_content(draft: Draft) -> str:
     return "\n".join(lines)
 
 
-def agent_content(name: str, description: str, model_provider: str, model: str, prompt: str) -> str:
-    return "\n".join(
-        [
-            f"name = {toml_string(name)}",
-            f"description = {toml_string(description)}",
-            f"model_provider = {toml_string(model_provider)}",
-            f"model = {toml_string(model)}",
-            f"developer_instructions = {toml_string(prompt)}",
-            "",
-        ]
-    )
-
-
-def agent_definitions(draft: Draft, repo_dir: Path) -> tuple[AgentDefinition, ...]:
-    agents_dir = draft.context_path.parent / "agents"
-    backend_agent_name = sanitize_identifier(draft.backend.key)
-    subagent_prompt = load_subagent_prompt(repo_dir)
-
-    definitions = []
-
-    gpt_path = agents_dir / "general-purpose-gpt.toml"
-    if not gpt_path.exists():
-        definitions.append(
-            AgentDefinition(
-                path=gpt_path,
-                content=agent_content(
-                    "general-purpose-gpt",
-                    f"General-purpose OpenAI-backed agent using provider openai and model {OPENAI_GENERAL_AGENT_MODEL}.",
-                    "openai",
-                    OPENAI_GENERAL_AGENT_MODEL,
-                    subagent_prompt,
-                ),
-            ),
-        )
-
-    definitions.append(
-        AgentDefinition(
-            path=agents_dir / f"general-purpose-{backend_agent_name}.toml",
-            content=agent_content(
-                f"general-purpose-{backend_agent_name}",
-                f"General-purpose {draft.backend.label}-backed agent using provider {draft.provider_id} and model {draft.default_model}.",
-                draft.provider_id,
-                draft.default_model,
-                subagent_prompt,
-            ),
-        ),
-    )
-
-    return tuple(definitions)
-
-
 def backup(path: Path) -> Path | None:
     if not path.exists():
         return None
@@ -1601,7 +1536,6 @@ def write_files(
     auth2api_config: Path,
     source_catalog: dict,
 ) -> list[Path]:
-    agents = agent_definitions(draft, repo_dir)
     existing_auth2api_config = auth2api_config.read_text() if auth2api_config.exists() else ""
     next_auth2api_config = upsert_model_advertisements(
         existing_auth2api_config,
@@ -1619,7 +1553,6 @@ def write_files(
             backup(codex_config),
             backup(draft.context_path),
             backup(draft.catalog_path),
-            *(backup(agent.path) for agent in agents),
             auth2api_config_backup,
         )
         if path
@@ -1627,8 +1560,6 @@ def write_files(
     codex_config.parent.mkdir(parents=True, exist_ok=True)
     draft.context_path.parent.mkdir(parents=True, exist_ok=True)
     auth2api_config.parent.mkdir(parents=True, exist_ok=True)
-    for agent in agents:
-        agent.path.parent.mkdir(parents=True, exist_ok=True)
     existing_config = codex_config.read_text() if codex_config.exists() else ""
     provider_config = remove_provider_blocks(existing_config, draft.provider_id)
     if draft.backend.key == "gemini":
@@ -1649,14 +1580,10 @@ def write_files(
     draft.context_path.write_text(context_content(draft))
     draft.catalog_path.write_text(json.dumps(catalog, indent=2) + "\n")
     auth2api_config.write_text(next_auth2api_config)
-    for agent in agents:
-        agent.path.write_text(agent.content)
     os.chmod(codex_config, 0o600)
     os.chmod(draft.context_path, 0o600)
     os.chmod(draft.catalog_path, 0o600)
     os.chmod(auth2api_config, 0o600)
-    for agent in agents:
-        os.chmod(agent.path, 0o600)
     return backups
 
 
@@ -2388,7 +2315,7 @@ def update_models_cache(repo_dir: Path) -> int:
         if not isinstance(model, dict):
             continue
         slug = model.get("slug") or model.get("id") or ""
-        if slug == OPENAI_GENERAL_AGENT_MODEL or slug.startswith("gpt-5.6") or slug.startswith("gpt-5.5") or slug.startswith("gpt-5.4"):
+        if slug.startswith("gpt-5.6") or slug.startswith("gpt-5.5") or slug.startswith("gpt-5.4"):
             model["base_instructions"] = gpt_prompt
             updated += 1
 
@@ -2560,8 +2487,6 @@ def main() -> int:
         print(f"Would update server model advertisements: {auth2api_config}")
         print(f"Would update context: {draft.context_path}")
         print(f"Would update model catalog: {draft.catalog_path}")
-        for agent in agent_definitions(draft, repo_dir):
-            print(f"Would update agent definition: {agent.path}")
         print(f"Provider: {draft.provider_id} ({draft.display_name})")
         print(f"Models: {', '.join(draft.selected_models)}")
         print(f"Fast model: {draft.fast_model}")
@@ -2581,9 +2506,6 @@ def main() -> int:
     print(f"Updated server model advertisements: {auth2api_config}")
     print(f"Updated context file: {draft.context_path}")
     print(f"Updated model catalog: {draft.catalog_path}")
-    print("Updated agent definitions:")
-    for agent in agent_definitions(draft, repo_dir):
-        print(f"  {agent.path}")
     if backups:
         print("Backups:")
         for path in backups:

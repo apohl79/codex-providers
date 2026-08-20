@@ -9,7 +9,7 @@ This project started as a fork of [auth2api](https://github.com/AmazingAng/auth2
 - Interactive Codex provider setup for Claude, DeepSeek, and Gemini
 - One local proxy with provider-aware model routing
 - Claude OAuth or Anthropic API-key authentication; DeepSeek and Gemini API keys; ChatGPT OAuth; experimental Cursor login
-- Generated Codex profiles, model catalogs, prompts, and general-purpose agent definitions
+- Generated Codex profiles, model catalogs, and prompts
 - OpenAI-compatible Chat Completions, Responses, and Models APIs, plus Anthropic Messages passthrough
 - Streaming, tools, images where supported, structured output, multi-account failover, and account statistics
 

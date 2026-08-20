@@ -506,7 +506,6 @@ class GeminiProxyBackendTest(unittest.TestCase):
                     ),
                 ) as ensure_api_key,
                 patch.object(codex_manager, "noninteractive_draft", return_value=(draft, {})),
-                patch.object(codex_manager, "agent_definitions", return_value=()),
             ):
                 result = codex_manager.main()
 

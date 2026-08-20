@@ -10,7 +10,7 @@ from pathlib import Path
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "codex-providers"
 LOADER = importlib.machinery.SourceFileLoader(
-    "codex_manager_agent_definitions",
+    "codex_manager_generated_files",
     str(MODULE_PATH),
 )
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
@@ -21,13 +21,7 @@ sys.modules[SPEC.name] = codex_manager
 LOADER.exec_module(codex_manager)
 
 
-class AgentDefinitionsTest(unittest.TestCase):
-    def _write_prompts(self, root: Path, include_subagents: bool = True) -> None:
-        prompts = root / "docs" / "prompts"
-        prompts.mkdir(parents=True)
-        if include_subagents:
-            (prompts / "subagents.md").write_text("Shared sub-agent instructions")
-
+class GeneratedFilesTest(unittest.TestCase):
     def _draft(self, root: Path) -> codex_manager.Draft:
         codex_home = root / "codex"
         return codex_manager.Draft(
@@ -48,71 +42,33 @@ class AgentDefinitionsTest(unittest.TestCase):
             False,
         )
 
-    def test_missing_gpt_config_uses_only_shared_subagent_instructions(self) -> None:
+    def test_write_files_does_not_generate_general_purpose_agents(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self._write_prompts(root)
+            codex_home = root / "codex"
 
-            definitions = codex_manager.agent_definitions(self._draft(root), root)
-            actual = [
-                (
-                    definition.path.name,
-                    codex_manager.tomllib.loads(definition.content)["developer_instructions"],
-                )
-                for definition in definitions
-            ]
+            codex_manager.write_files(
+                self._draft(root),
+                codex_home / "config.toml",
+                MODULE_PATH.parent,
+                root / "auth2api.yaml",
+                {"models": []},
+            )
+            generated_files = sorted(
+                path.relative_to(root).as_posix()
+                for path in root.rglob("*")
+                if path.is_file()
+            )
 
         self.assertEqual(
-            actual,
+            generated_files,
             [
-                (
-                    "general-purpose-gpt.toml",
-                    "Shared sub-agent instructions",
-                ),
-                (
-                    "general-purpose-claude.toml",
-                    "Shared sub-agent instructions",
-                ),
+                "auth2api.yaml",
+                "codex/claude-models.json",
+                "codex/claude.config.toml",
+                "codex/config.toml",
             ],
         )
-
-    def test_existing_gpt_config_uses_only_shared_subagent_instructions(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self._write_prompts(root)
-            agents = root / "codex" / "agents"
-            agents.mkdir(parents=True)
-            (agents / "general-purpose-gpt.toml").write_text("user-managed")
-
-            definitions = codex_manager.agent_definitions(self._draft(root), root)
-            actual = [
-                (
-                    definition.path.name,
-                    codex_manager.tomllib.loads(definition.content)["developer_instructions"],
-                )
-                for definition in definitions
-            ]
-
-        self.assertEqual(
-            actual,
-            [
-                (
-                    "general-purpose-claude.toml",
-                    "Shared sub-agent instructions",
-                ),
-            ],
-        )
-
-    def test_missing_subagent_extension_fails_agent_generation(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self._write_prompts(root, include_subagents=False)
-
-            with self.assertRaisesRegex(
-                FileNotFoundError,
-                "Subagent prompt file not found",
-            ):
-                codex_manager.agent_definitions(self._draft(root), root)
 
     def test_model_catalog_keeps_the_backend_base_prompt(self) -> None:
         catalog = codex_manager.build_catalog(
