@@ -161,6 +161,10 @@ DEFAULT_REASONING_LEVEL = "medium"
 DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION = 8
 CATALOG_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100
 MULTI_AGENT_V2_FEATURE_TABLE = "features.multi_agent_v2"
+RESTART_HINT = (
+    "Running Codex sessions and the app-server daemon keep the previous model catalog; "
+    "run `codex app-server daemon restart` and reopen Codex to load the new context window."
+)
 
 def _prompts_dir() -> Path:
     """Return the docs/prompts directory relative to this script."""
@@ -2511,6 +2515,7 @@ def main() -> int:
         for path in backups:
             print(f"  {path}")
     print(f"Use with: codex -p {draft.context_name}")
+    print(RESTART_HINT)
     return 0
 
 
