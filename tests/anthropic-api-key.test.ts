@@ -69,6 +69,43 @@ test("Anthropic API-key accounts call Messages with direct authentication", asyn
   assert.equal(response.status, 200);
 });
 
+test("Anthropic API-key accounts send the thinking-binding beta when the body binds thinking blocks", async (t) => {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-anthropic-"));
+  const { provider, account } = loadApiKeyAccount(authDir);
+  const originalFetch = global.fetch;
+  global.fetch = async (_input, init) => {
+    const headers = init?.headers as Record<string, string>;
+    assert.equal(
+      headers["anthropic-beta"],
+      "thinking-binding-controls-2026-08-01",
+    );
+    return new Response("{}", { status: 200 });
+  };
+  t.after(() => {
+    global.fetch = originalFetch;
+    fs.rmSync(authDir, { recursive: true, force: true });
+  });
+
+  const response = await provider.callMessages({
+    request: {
+      body: {
+        model: "fable",
+        messages: [],
+        max_tokens: 1,
+        thinking: {
+          type: "adaptive",
+          block_binding: { prefix_mismatch_behavior: "drop_block" },
+        },
+      },
+      headers: {},
+    } as Request,
+    account,
+    config: makeConfig(authDir),
+  });
+
+  assert.equal(response.status, 200);
+});
+
 test("Anthropic API-key accounts count tokens with direct authentication", async (t) => {
   const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-anthropic-"));
   const { provider, account } = loadApiKeyAccount(authDir);

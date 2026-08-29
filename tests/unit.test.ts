@@ -1031,6 +1031,89 @@ test("responsesToAnthropic preserves explicit adaptive output limits", () => {
   assert.equal(result.max_tokens, 20000);
 });
 
+test("responsesToAnthropic asks Fable models to drop prefix-mismatched thinking blocks", () => {
+  const result = responsesToAnthropic({
+    model: "fable",
+    reasoning: { effort: "high", summary: "auto" },
+    input: [{ role: "user", content: "hi" }],
+  });
+  assert.deepEqual(result.thinking, {
+    type: "adaptive",
+    display: "summarized",
+    block_binding: { prefix_mismatch_behavior: "drop_block" },
+  });
+});
+
+test("responsesToAnthropic downgrades a forced named tool to auto on Fable 5.1", () => {
+  const result = responsesToAnthropic({
+    model: "claude-melon-lp-eap",
+    instructions: "Be brief.",
+    reasoning: { effort: "high" },
+    tools: [{ type: "function", name: "get_weather", parameters: {} }],
+    tool_choice: { type: "function", name: "get_weather" },
+    input: [{ role: "user", content: "Weather in Tokyo?" }],
+  });
+  assert.deepEqual(result.tool_choice, { type: "auto" });
+  assert.deepEqual(result.system, [
+    { type: "text", text: "Be brief." },
+    { type: "text", text: "You must respond by calling the `get_weather` tool." },
+  ]);
+  assert.notEqual(result.thinking, undefined);
+});
+
+test("responsesToAnthropic keeps disable_parallel_tool_use when downgrading required tool_choice on Fable 5.1", () => {
+  const result = responsesToAnthropic({
+    model: "claude-melon-lp-eap",
+    tools: [{ type: "function", name: "get_weather", parameters: {} }],
+    tool_choice: "required",
+    parallel_tool_calls: false,
+    input: [{ role: "user", content: "Weather in Tokyo?" }],
+  });
+  assert.deepEqual(result.tool_choice, {
+    type: "auto",
+    disable_parallel_tool_use: true,
+  });
+  assert.deepEqual(result.system, [
+    {
+      type: "text",
+      text: "You must respond by calling one of the available tools.",
+    },
+  ]);
+});
+
+test("responsesToAnthropic still forwards forced tool_choice without thinking on Fable 5", () => {
+  const result = responsesToAnthropic({
+    model: "fable",
+    reasoning: { effort: "high" },
+    tools: [{ type: "function", name: "get_weather", parameters: {} }],
+    tool_choice: "required",
+    input: [{ role: "user", content: "Weather in Tokyo?" }],
+  });
+  assert.deepEqual(result.tool_choice, { type: "any" });
+  assert.equal(result.thinking, undefined);
+  assert.equal(result.system, undefined);
+});
+
+test("openaiToAnthropic downgrades required tool_choice to auto on Fable 5.1", () => {
+  const result = openaiToAnthropic({
+    model: "claude-melon-lp-eap",
+    messages: [
+      { role: "system", content: "Be brief." },
+      { role: "user", content: "Weather in Tokyo?" },
+    ],
+    tools: [{ type: "function", function: { name: "get_weather" } }],
+    tool_choice: "required",
+  });
+  assert.deepEqual(result.tool_choice, { type: "auto" });
+  assert.deepEqual(result.system, [
+    { type: "text", text: "Be brief." },
+    {
+      type: "text",
+      text: "You must respond by calling one of the available tools.",
+    },
+  ]);
+});
+
 test("responsesToAnthropic replays reasoning before a DeepSeek tool call", () => {
   const result = responsesToAnthropic({
     model: "deepseek-v4-pro",
