@@ -749,5 +749,64 @@ class FastModelSelectionTest(unittest.TestCase):
         )
 
 
+class WriteSummaryTest(unittest.TestCase):
+    def test_main_prints_restart_hint_after_writing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            codex_home = root / "codex"
+            args = type(
+                "Args",
+                (),
+                {
+                    "update_models_cache": False,
+                    "codex_home": str(codex_home),
+                    "codex_config": str(codex_home / "config.toml"),
+                    "auth2api_config": str(root / "config.yaml"),
+                    "source_context": None,
+                    "preset_explicit": True,
+                    "yes": True,
+                    "preset": "claude",
+                    "dry_run": False,
+                    "skip_login_check": True,
+                    "manual_login": False,
+                },
+            )()
+            draft = codex_manager.Draft(
+                "claude",
+                codex_home / "claude.config.toml",
+                "anthropic",
+                "Claude",
+                codex_manager.BACKENDS["claude"],
+                "http://127.0.0.1:8317/v1",
+                ("claude-opus-5",),
+                "claude-opus-5",
+                "claude-haiku-4-5-20251001",
+                "high",
+                200000,
+                180000,
+                8,
+                codex_home / "claude-models.json",
+                False,
+            )
+            auth_config = codex_manager.Auth2ApiConfig("127.0.0.1", 8317, "~/.codex-providers", "auth2api-key", "ANTHROPIC_API_KEY")
+            output = io.StringIO()
+
+            with (
+                patch.object(codex_manager, "parse_args", return_value=args),
+                patch.object(codex_manager, "read_auth2api_config", return_value=auth_config),
+                patch.object(codex_manager, "ensure_backend_login"),
+                patch.object(codex_manager, "ensure_api_key", return_value=(auth_config, [], False)),
+                patch.object(codex_manager, "noninteractive_draft", return_value=(draft, {})),
+                patch.object(codex_manager, "write_files", return_value=[]),
+                patch.object(sys, "stdout", output),
+            ):
+                result = codex_manager.main()
+
+        self.assertEqual(
+            (result, output.getvalue().splitlines()[-2:]),
+            (0, ["Use with: codex -p claude", codex_manager.RESTART_HINT]),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
