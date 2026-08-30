@@ -973,6 +973,68 @@ test("responsesToAnthropic translates developer input to system", () => {
   assert.deepEqual(result.messages, [{ role: "user", content: "hi" }]);
 });
 
+test("responsesToAnthropic keeps developer items after the first message positional", () => {
+  const result = responsesToAnthropic({
+    model: "opus",
+    input: [
+      { role: "developer", content: "Leading contract" },
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "ok" },
+      { role: "developer", content: "<permissions instructions>updated" },
+      { role: "user", content: "next" },
+    ],
+  });
+  assert.deepEqual(result.system, [{ type: "text", text: "Leading contract" }]);
+  assert.deepEqual(result.messages, [
+    { role: "user", content: "hi" },
+    { role: "assistant", content: "ok" },
+    {
+      role: "user",
+      content: [{ type: "text", text: "<permissions instructions>updated" }],
+    },
+    { role: "user", content: "next" },
+  ]);
+});
+
+test("responsesToAnthropic keeps developer items after tool output positional", () => {
+  const result = responsesToAnthropic({
+    model: "opus",
+    input: [
+      { role: "user", content: "run it" },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "shell",
+        arguments: '{"cmd":"ls"}',
+      },
+      { type: "function_call_output", call_id: "call_1", output: "done" },
+      { role: "developer", content: "<turn_aborted>interrupted" },
+      { role: "user", content: "next" },
+    ],
+  });
+  assert.equal(result.system, undefined);
+  assert.deepEqual(result.messages, [
+    { role: "user", content: "run it" },
+    {
+      role: "assistant",
+      content: [
+        { type: "tool_use", id: "call_1", name: "shell", input: { cmd: "ls" } },
+      ],
+    },
+    {
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "call_1", content: "done" },
+      ],
+    },
+    {
+      role: "user",
+      content: [{ type: "text", text: "<turn_aborted>interrupted" }],
+    },
+    { role: "user", content: "next" },
+  ]);
+});
+
 test("responsesToAnthropic translates reasoning with summary", () => {
   const result = responsesToAnthropic({
     model: "sonnet",
