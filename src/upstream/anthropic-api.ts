@@ -9,6 +9,34 @@ import { resolveModel } from "./translator";
 
 const BASE_URL = "https://api.anthropic.com";
 const OAUTH_BETA = "oauth-2025-04-20";
+const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
+
+/**
+ * Betas that must accompany fields the translator put into the request body.
+ * `thinking.block_binding` (prefix-locked thinking on Fable models) is
+ * rejected as an extra input unless its beta is present.
+ */
+function bodyRequiredBetas(body: any): string[] {
+  return body?.thinking?.block_binding ? [THINKING_BINDING_BETA] : [];
+}
+
+function withBetas(
+  headers: Record<string, string>,
+  betas: string[],
+): Record<string, string> {
+  if (betas.length === 0) return headers;
+  const existing =
+    typeof headers["anthropic-beta"] === "string"
+      ? headers["anthropic-beta"]
+          .split(",")
+          .map((beta) => beta.trim())
+          .filter(Boolean)
+      : [];
+  return {
+    ...headers,
+    "anthropic-beta": [...new Set([...existing, ...betas])].join(","),
+  };
+}
 
 /**
  * Dynamic Anthropic-Beta construction — mirrors Claude Code's utils/betas.ts
@@ -268,15 +296,18 @@ export async function callAnthropicMessages(
   const timeoutMs = stream
     ? config.timeouts["stream-messages-ms"]
     : config.timeouts["messages-ms"];
-  const newHeaders = buildHeaders(
-    account.token.accessToken,
-    stream,
-    timeoutMs,
-    model,
-    config.cloaking,
-    apiKeyHash,
-    structured,
-    extractPassthroughHeaders(request.headers),
+  const newHeaders = withBetas(
+    buildHeaders(
+      account.token.accessToken,
+      stream,
+      timeoutMs,
+      model,
+      config.cloaking,
+      apiKeyHash,
+      structured,
+      extractPassthroughHeaders(request.headers),
+    ),
+    bodyRequiredBetas(upstreamBody),
   );
 
   const response = await fetch(url, {
@@ -327,14 +358,17 @@ export async function callAnthropicMessagesWithApiKey(
 
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      ...buildApiKeyHeaders(
-        stream,
-        !!options.includeBetaHeaders,
-        extractPassthroughHeaders(request.headers),
-      ),
-      "x-api-key": account.token.accessToken,
-    },
+    headers: withBetas(
+      {
+        ...buildApiKeyHeaders(
+          stream,
+          !!options.includeBetaHeaders,
+          extractPassthroughHeaders(request.headers),
+        ),
+        "x-api-key": account.token.accessToken,
+      },
+      bodyRequiredBetas(upstreamBody),
+    ),
     body: JSON.stringify(upstreamBody),
     signal: withTimeoutSignal(timeoutMs, options.signal),
   });

@@ -101,6 +101,31 @@ function supportsAdaptiveThinking(model: string): boolean {
   return ADAPTIVE_THINKING_MODELS.has(model.toLowerCase());
 }
 
+// Fable-generation models bind replayed thinking blocks to the exact prefix
+// (system, tools, earlier messages) that produced them. Codex edits that
+// prefix between requests (tool list changes, compaction chunks), so ask the
+// API to drop stale blocks instead of failing the request with a 400. The
+// matching `thinking-binding-controls` beta header is added in anthropic-api.ts.
+const PREFIX_LOCKED_THINKING_MODEL_RE = /^claude-(melon-|fable-)/i;
+const DROP_STALE_THINKING_BLOCKS = {
+  block_binding: { prefix_mismatch_behavior: "drop_block" },
+};
+
+// Starting with Fable 5.1 (launch preview: claude-melon-lp-eap) the API
+// rejects `tool_choice: any|tool` with a 400. Fable 5 still accepts it.
+const FORCED_TOOL_CHOICE_ALLOWED_FABLE_MODELS = new Set(["claude-fable-5"]);
+
+function supportsPrefixLockedThinking(model: string): boolean {
+  return PREFIX_LOCKED_THINKING_MODEL_RE.test(model);
+}
+
+function rejectsForcedToolChoice(model: string): boolean {
+  return (
+    PREFIX_LOCKED_THINKING_MODEL_RE.test(model) &&
+    !FORCED_TOOL_CHOICE_ALLOWED_FABLE_MODELS.has(model.toLowerCase())
+  );
+}
+
 function applyThinking(
   anthropicBody: any,
   effort: string,
@@ -115,6 +140,9 @@ function applyThinking(
     anthropicBody.thinking = {
       type: "adaptive",
       ...(summary ? { display: "summarized" } : {}),
+      ...(supportsPrefixLockedThinking(anthropicBody.model)
+        ? DROP_STALE_THINKING_BLOCKS
+        : {}),
     };
     anthropicBody.output_config = {
       ...(anthropicBody.output_config || {}),
@@ -143,9 +171,29 @@ function applyThinking(
   }
 }
 
-function disableThinkingIfToolChoiceForced(anthropicBody: any): void {
+function forcedToolChoiceHint(toolChoice: any): string {
+  return toolChoice.type === "tool" && toolChoice.name
+    ? `You must respond by calling the \`${toolChoice.name}\` tool.`
+    : "You must respond by calling one of the available tools.";
+}
+
+// Forced tool use skips thinking on models that support it and is rejected
+// outright by Fable 5.1+. Either drop thinking (legacy behaviour) or downgrade
+// to `auto` and state the expectation in the system prompt instead.
+function reconcileForcedToolChoice(anthropicBody: any): void {
   const tcType = anthropicBody.tool_choice?.type;
-  if (tcType === "any" || tcType === "tool") {
+  if (tcType !== "any" && tcType !== "tool") return;
+  if (rejectsForcedToolChoice(anthropicBody.model)) {
+    const hint = forcedToolChoiceHint(anthropicBody.tool_choice);
+    const { name, ...rest } = anthropicBody.tool_choice;
+    anthropicBody.tool_choice = { ...rest, type: "auto" };
+    anthropicBody.system = [
+      ...(anthropicBody.system || []),
+      { type: "text", text: hint },
+    ];
+    return;
+  }
+  if (anthropicBody.thinking) {
     delete anthropicBody.thinking;
   }
 }
@@ -171,8 +219,11 @@ function convertToolChoice(tc: any): any {
   if (tc === "auto" || tc?.type === "auto") return { type: "auto" };
   if (tc === "required" || tc?.type === "required") return { type: "any" };
   if (tc === "none" || tc?.type === "none") return { type: "none" };
-  if (tc?.type === "function" && tc.function?.name) {
-    return { type: "tool", name: tc.function.name };
+  // Chat Completions nests the name under `function`; the Responses API puts
+  // it at the top level.
+  const forcedName = tc?.function?.name ?? tc?.name;
+  if (tc?.type === "function" && forcedName) {
+    return { type: "tool", name: forcedName };
   }
   return tc;
 }
@@ -431,8 +482,8 @@ export function openaiToAnthropic(body: any): any {
     anthropicBody.tool_choice.disable_parallel_tool_use = true;
   }
 
-  if (anthropicBody.thinking && anthropicBody.tool_choice) {
-    disableThinkingIfToolChoiceForced(anthropicBody);
+  if (anthropicBody.tool_choice) {
+    reconcileForcedToolChoice(anthropicBody);
   }
 
   return anthropicBody;
@@ -938,8 +989,8 @@ export function responsesToAnthropic(body: any): any {
     anthropicBody.tool_choice.disable_parallel_tool_use = true;
   }
 
-  if (anthropicBody.thinking && anthropicBody.tool_choice) {
-    disableThinkingIfToolChoiceForced(anthropicBody);
+  if (anthropicBody.tool_choice) {
+    reconcileForcedToolChoice(anthropicBody);
   }
 
   // input[] → messages[]

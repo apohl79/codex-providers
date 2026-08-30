@@ -1383,6 +1383,50 @@ test("claude-cli anthropic-beta passthrough deduplicates oauth beta", async (t) 
   assert.equal(resp.status, 200);
 });
 
+test("adds the thinking-binding beta to Claude OAuth requests that bind thinking blocks", async (t) => {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-smoke-"));
+  const manager = makeManager(authDir, [makeToken()]);
+  const restoreFetch = withMockedFetch(async (_input, init) => {
+    const headers = init?.headers as Record<string, string>;
+    const betas = headers["anthropic-beta"].split(",");
+    assert.ok(betas.includes("oauth-2025-04-20"));
+    assert.ok(betas.includes("thinking-binding-controls-2026-08-01"));
+    return new Response(
+      JSON.stringify({
+        id: "msg_1",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  const server = await startApp(makeConfig(authDir), manager);
+  t.after(async () => {
+    restoreFetch();
+    await stopApp(server);
+    fs.rmSync(authDir, { recursive: true, force: true });
+  });
+
+  const resp = await requestJson({
+    server,
+    method: "POST",
+    path: "/v1/messages",
+    headers: { Authorization: "Bearer test-key" },
+    body: {
+      model: "claude-fable-5",
+      max_tokens: 16,
+      thinking: {
+        type: "adaptive",
+        block_binding: { prefix_mismatch_behavior: "drop_block" },
+      },
+      messages: [{ role: "user", content: "hi" }],
+    },
+  });
+
+  assert.equal(resp.status, 200);
+});
+
 test("strips Claude Code 1m model suffix before Anthropic upstream", async (t) => {
   const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "auth2api-smoke-"));
   const manager = makeManager(authDir, [makeToken()]);
